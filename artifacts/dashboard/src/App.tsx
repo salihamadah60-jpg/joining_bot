@@ -10,6 +10,7 @@ import Accounts from "@/pages/Accounts";
 import Links from "@/pages/Links";
 import Jobs from "@/pages/Jobs";
 import Collections from "@/pages/Collections";
+import Settings from "@/pages/Settings";
 
 const queryClient = new QueryClient();
 
@@ -22,6 +23,7 @@ function Router() {
         <Route path="/links" component={Links} />
         <Route path="/jobs" component={Jobs} />
         <Route path="/collections" component={Collections} />
+        <Route path="/settings" component={Settings} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

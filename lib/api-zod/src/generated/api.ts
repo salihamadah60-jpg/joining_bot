@@ -346,6 +346,31 @@ export const SyncCollectionResponse = zod.object({
 
 
 /**
+ * @summary Get all application settings
+ */
+export const GetSettingsResponse = zod.record(zod.string(), zod.string()).describe('Flat key→value map of settings')
+
+
+/**
+ * @summary Update one or more settings
+ */
+export const UpdateSettingsBody = zod.record(zod.string(), zod.string()).describe('Flat key→value map of settings')
+
+export const UpdateSettingsResponse = zod.object({
+  "updated": zod.array(zod.string())
+})
+
+
+/**
+ * @summary Check if Telegram API credentials are configured
+ */
+export const GetTelegramStatusResponse = zod.object({
+  "configured": zod.boolean(),
+  "source": zod.enum(['env', 'database', 'none'])
+})
+
+
+/**
  * @summary Get current bot running status
  */
 export const GetBotStatusResponse = zod.object({

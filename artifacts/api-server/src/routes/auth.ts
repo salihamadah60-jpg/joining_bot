@@ -32,7 +32,7 @@ import { eq } from "drizzle-orm";
 import { db, accountsTable } from "@workspace/db";
 import { TelegramClient, SentCode } from "@mtcute/node";
 import { logger } from "../lib/logger.js";
-import { SESSIONS_DIR } from "../lib/clientPool.js";
+import { SESSIONS_DIR, createTempClient } from "../lib/clientPool.js";
 
 const router: IRouter = Router();
 
@@ -64,15 +64,6 @@ setInterval(() => {
 
 function cleanupFile(p: string) {
   unlink(p, () => {});
-}
-
-function getApiCredentials(): { apiId: number; apiHash: string } {
-  const apiId = Number(process.env["TELEGRAM_API_ID"]);
-  const apiHash = process.env["TELEGRAM_API_HASH"] ?? "";
-  if (!apiId || !apiHash) {
-    throw new Error("TELEGRAM_API_ID and TELEGRAM_API_HASH must be set");
-  }
-  return { apiId, apiHash };
 }
 
 function authStoragePath(phone: string): string {
@@ -116,14 +107,6 @@ router.post("/auth/send-code", async (req, res): Promise<void> => {
     return;
   }
 
-  let creds;
-  try {
-    creds = getApiCredentials();
-  } catch {
-    res.status(503).json({ error: "TELEGRAM_API_ID و TELEGRAM_API_HASH غير مضبوطين في البيئة" });
-    return;
-  }
-
   // Destroy any existing pending session for this phone
   const existing = pendingAuth.get(phone);
   if (existing) {
@@ -133,11 +116,13 @@ router.post("/auth/send-code", async (req, res): Promise<void> => {
   }
 
   const storagePath = authStoragePath(phone);
-  const client = new TelegramClient({
-    apiId: creds.apiId,
-    apiHash: creds.apiHash,
-    storage: storagePath,
-  });
+  let client: TelegramClient;
+  try {
+    client = await createTempClient(storagePath);
+  } catch (credErr: any) {
+    res.status(503).json({ error: credErr?.message ?? "بيانات اعتماد Telegram API غير مضبوطة. أدخلها من صفحة الإعدادات." });
+    return;
+  }
 
   try {
     await client.connect();

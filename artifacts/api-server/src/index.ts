@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { engineInit } from "./lib/telegramEngine";
 import { cleanupIdleClients } from "./lib/clientPool";
+import { startAutoSync } from "./lib/mongoSync";
 
 const rawPort = process.env["PORT"];
 
@@ -31,6 +32,9 @@ app.listen(port, async (err) => {
   } catch (e) {
     logger.error({ err: e }, "Failed to initialize bot engine");
   }
+
+  // Start MongoDB auto-sync (runs every 30 min by default)
+  startAutoSync();
 
   // Clean up idle Telegram clients every 30 minutes
   setInterval(() => {

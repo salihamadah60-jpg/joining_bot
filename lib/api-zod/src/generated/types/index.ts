@@ -39,4 +39,8 @@ export * from './linksStats';
 export * from './listJobsParams';
 export * from './listLinksParams';
 export * from './listLinksStatus';
+export * from './settingsMap';
 export * from './syncResult';
+export * from './telegramCredentialStatus';
+export * from './telegramCredentialStatusSource';
+export * from './updateSettings200';

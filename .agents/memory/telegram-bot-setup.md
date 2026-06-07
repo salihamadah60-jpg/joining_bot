@@ -43,6 +43,33 @@ await pool.query('ALTER TABLE ...');
 
 `lib/api-zod/src/index.ts` must only export from `"./generated/api"` — NOT from `"./generated/types"`. The types/ folder has TypeScript types with same names as Zod schemas, causing duplicate export errors.
 
+**IMPORTANT:** Orval codegen OVERWRITES `lib/api-zod/src/index.ts` and re-adds the `./generated/types` export every time. After running `pnpm exec orval`, immediately run:
+```
+echo 'export * from "./generated/api";' > lib/api-zod/src/index.ts
+```
+The codegen npm script in `api-spec/package.json` also runs typecheck — to avoid the typecheck failure, run orval separately first, fix the index, then typecheck.
+
+## Settings DB Table
+
+Added `settings` table (key/value store) for Telegram API credentials and system config. Migration: `CREATE TABLE IF NOT EXISTS settings (key text PRIMARY KEY, value text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`.
+
+`clientPool.ts` reads credentials: ENV vars first → cached DB values → DB query. Call `invalidateCredentialsCache()` after updating settings.
+
+## Workflow Environment Variables
+
+The "Start application" workflow command must include both PORT and BASE_PATH:
+```
+PORT=8080 pnpm --filter @workspace/api-server run dev & PORT=23183 BASE_PATH=/ pnpm --filter @workspace/dashboard run dev & wait
+```
+
+## MongoDB Auto-Sync
+
+`artifacts/api-server/src/lib/mongoSync.ts` — background scheduler, runs every 30 min by default. Started from `index.ts` via `startAutoSync()`. Deduplicates via unique URL constraint (catches error code 23505).
+
+## Plan File Location
+
+Full project plan (atomic, with status per feature): `/home/runner/workspace/PLAN.md`
+
 ## Auth Flow (Telegram OTP)
 
 In-memory `Map<phone, PendingSession>` holds TelegramClient mid-flow. Sessions auto-expire after 10 min. After verify, `client.exportSession()` string is saved to `accounts.session_string`. Temp SQLite file (`auth_{phone}.db`) deleted after auth completes.

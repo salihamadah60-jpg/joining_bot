@@ -6,6 +6,7 @@ import jobsRouter from "./jobs";
 import collectionsRouter from "./collections";
 import botRouter from "./bot";
 import authRouter from "./auth";
+import settingsRouter from "./settings";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(jobsRouter);
 router.use(collectionsRouter);
 router.use(botRouter);
 router.use(authRouter);
+router.use(settingsRouter);
 
 export default router;

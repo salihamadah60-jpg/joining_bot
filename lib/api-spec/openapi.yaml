@@ -22,6 +22,8 @@ tags:
     description: MongoDB collection management
   - name: bot
     description: Bot control and status
+  - name: settings
+    description: Application settings and credentials
 paths:
   /healthz:
     get:
@@ -421,6 +423,55 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SyncResult"
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get all application settings
+      responses:
+        "200":
+          description: Settings key-value map
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsMap"
+    put:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update one or more settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsMap"
+      responses:
+        "200":
+          description: Updated keys
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [updated]
+                properties:
+                  updated:
+                    type: array
+                    items:
+                      type: string
+
+  /settings/telegram-status:
+    get:
+      operationId: getTelegramStatus
+      tags: [settings]
+      summary: Check if Telegram API credentials are configured
+      responses:
+        "200":
+          description: Credential status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelegramCredentialStatus"
 
   /bot/status:
     get:
@@ -852,3 +903,19 @@ components:
           type: ["integer", "null"]
         createdAt:
           type: string
+
+    SettingsMap:
+      type: object
+      additionalProperties:
+        type: string
+      description: Flat key→value map of settings
+
+    TelegramCredentialStatus:
+      type: object
+      required: [configured, source]
+      properties:
+        configured:
+          type: boolean
+        source:
+          type: string
+          enum: [env, database, none]

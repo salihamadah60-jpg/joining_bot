@@ -13,6 +13,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { mkdirSync } from "fs";
 import { logger } from "./logger.js";
+import { db, settingsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SESSIONS_DIR = path.join(__dirname, "../../../../sessions");
@@ -32,15 +34,45 @@ function sessionFilePath(phone: string): string {
   return path.join(SESSIONS_DIR, `${safe}.db`);
 }
 
-function getApiCredentials(): { apiId: number; apiHash: string } {
-  const apiId = Number(process.env["TELEGRAM_API_ID"]);
-  const apiHash = process.env["TELEGRAM_API_HASH"] ?? "";
-  if (!apiId || !apiHash) {
+// Cache DB credentials to avoid a DB hit on every client creation
+let cachedApiId: number | null = null;
+let cachedApiHash: string | null = null;
+
+export function invalidateCredentialsCache(): void {
+  cachedApiId = null;
+  cachedApiHash = null;
+}
+
+async function getApiCredentials(): Promise<{ apiId: number; apiHash: string }> {
+  // 1. Environment variables take priority
+  const envApiId = Number(process.env["TELEGRAM_API_ID"]);
+  const envApiHash = process.env["TELEGRAM_API_HASH"] ?? "";
+  if (envApiId && envApiHash) {
+    return { apiId: envApiId, apiHash: envApiHash };
+  }
+
+  // 2. Cached DB values
+  if (cachedApiId && cachedApiHash) {
+    return { apiId: cachedApiId, apiHash: cachedApiHash };
+  }
+
+  // 3. Read from settings table
+  const rows = await db.select().from(settingsTable);
+  const kv: Record<string, string> = {};
+  for (const r of rows) kv[r.key] = r.value;
+
+  const dbApiId = Number(kv["telegram_api_id"]);
+  const dbApiHash = kv["telegram_api_hash"] ?? "";
+
+  if (!dbApiId || !dbApiHash) {
     throw new Error(
-      "TELEGRAM_API_ID and TELEGRAM_API_HASH environment variables are required"
+      "Telegram API credentials not configured. Please add TELEGRAM_API_ID and TELEGRAM_API_HASH via the Settings page or as environment variables."
     );
   }
-  return { apiId, apiHash };
+
+  cachedApiId = dbApiId;
+  cachedApiHash = dbApiHash;
+  return { apiId: dbApiId, apiHash: dbApiHash };
 }
 
 /**
@@ -58,7 +90,7 @@ export async function getClient(
     return cached.client;
   }
 
-  const { apiId, apiHash } = getApiCredentials();
+  const { apiId, apiHash } = await getApiCredentials();
   const storagePath = sessionFilePath(phone);
 
   const client = new TelegramClient({
@@ -88,8 +120,8 @@ export async function getClient(
  * Create a temporary TelegramClient for auth flow (send-code → verify → save session).
  * Does NOT add to pool — caller manages lifecycle.
  */
-export function createTempClient(storagePath: string): TelegramClient {
-  const { apiId, apiHash } = getApiCredentials();
+export async function createTempClient(storagePath: string): Promise<TelegramClient> {
+  const { apiId, apiHash } = await getApiCredentials();
   return new TelegramClient({ apiId, apiHash, storage: storagePath });
 }
 

@@ -306,6 +306,25 @@ export interface ActivityEntry {
   createdAt: string;
 }
 
+/**
+ * Flat key→value map of settings
+ */
+export interface SettingsMap {[key: string]: string}
+
+export type TelegramCredentialStatusSource = typeof TelegramCredentialStatusSource[keyof typeof TelegramCredentialStatusSource];
+
+
+export const TelegramCredentialStatusSource = {
+  env: 'env',
+  database: 'database',
+  none: 'none',
+} as const;
+
+export interface TelegramCredentialStatus {
+  configured: boolean;
+  source: TelegramCredentialStatusSource;
+}
+
 export type AuthCancelBody = {
   phone: string;
 };
@@ -335,5 +354,9 @@ limit?: number;
  * @nullable
  */
 accountId?: number | null;
+};
+
+export type UpdateSettings200 = {
+  updated: string[];
 };
 
