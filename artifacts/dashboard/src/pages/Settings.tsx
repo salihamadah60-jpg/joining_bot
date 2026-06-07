@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Settings2, Key, ShieldCheck, ShieldX, Save, Eye, EyeOff, Moon, Bot } from "lucide-react";
+import { Settings2, Key, ShieldCheck, ShieldX, Save, Eye, EyeOff, Moon, Bot, DatabaseBackup, RefreshCw, Upload, Download } from "lucide-react";
 
 export default function Settings() {
   const { toast } = useToast();
@@ -32,6 +32,8 @@ export default function Settings() {
       setAutoSyncInterval(s["auto_sync_interval_minutes"] ?? "30");
       setActiveStartHour(s["active_start_hour"] ?? "8");
       setAiFilterEnabled(s["ai_filter_enabled"] === "true");
+      setMongoBackupUrl(s["mongo_backup_url"] ?? "");
+      setMongoBackupDb(s["mongo_backup_db"] ?? "tg_backup");
     }
   }, [settings]);
 
@@ -95,6 +97,71 @@ export default function Settings() {
         onError: () => toast({ title: "خطأ", description: "فشل حفظ الإعدادات", variant: "destructive" }),
       }
     );
+  };
+
+  // P3-3: MongoDB backup state
+  const [mongoBackupUrl, setMongoBackupUrl] = useState("");
+  const [mongoBackupDb, setMongoBackupDb] = useState("tg_backup");
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [restoreLoading, setRestoreLoading] = useState(false);
+  const [backupResult, setBackupResult] = useState<any>(null);
+
+  // P3-3: Save MongoDB backup URL
+  const handleSaveMongoBackup = () => {
+    if (!mongoBackupUrl.trim()) {
+      toast({ title: "خطأ", description: "أدخل رابط MongoDB أولاً", variant: "destructive" });
+      return;
+    }
+    updateSettings.mutate(
+      { data: { mongo_backup_url: mongoBackupUrl.trim(), mongo_backup_db: mongoBackupDb.trim() || "tg_backup" } },
+      {
+        onSuccess: () => {
+          toast({ title: "✅ تم الحفظ", description: "تم حفظ إعدادات النسخ الاحتياطي" });
+          refetchSettings();
+        },
+        onError: () => toast({ title: "خطأ", description: "فشل حفظ الإعدادات", variant: "destructive" }),
+      }
+    );
+  };
+
+  // P3-3: Trigger manual backup
+  const handleBackupNow = async () => {
+    setBackupLoading(true);
+    setBackupResult(null);
+    try {
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+      const r = await fetch(`${base}/api/sessions/backup`, { method: "POST" });
+      const data = await r.json();
+      setBackupResult(data);
+      if (data.ok) {
+        toast({ title: "✅ نسخ احتياطي مكتمل", description: `تم حفظ ${data.backedUp} جلسة في MongoDB` });
+      } else {
+        toast({ title: "خطأ", description: data.error ?? "فشل النسخ الاحتياطي", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "خطأ في الاتصال", description: "تأكد من أن الخادم يعمل", variant: "destructive" });
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  // P3-3: Restore sessions from MongoDB
+  const handleRestoreNow = async () => {
+    setRestoreLoading(true);
+    try {
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+      const r = await fetch(`${base}/api/sessions/restore`, { method: "POST" });
+      const data = await r.json();
+      if (data.ok) {
+        toast({ title: "✅ استعادة مكتملة", description: `تمت استعادة ${data.restored} جلسة من MongoDB` });
+      } else {
+        toast({ title: "خطأ", description: data.error ?? "فشلت الاستعادة", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "خطأ في الاتصال", variant: "destructive" });
+    } finally {
+      setRestoreLoading(false);
+    }
   };
 
   // P3-1: Save AI filter setting
@@ -342,6 +409,94 @@ export default function Settings() {
           {aiFilterEnabled && (
             <div className="bg-primary/5 border border-primary/20 rounded-md p-3 text-xs text-primary">
               ✅ الفلتر نشط — كل مجموعة ستُعرض على Gemini قبل تسجيلها كمرتبطة/غير مرتبطة.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* P3-3: MongoDB Session Backup */}
+      <Card className="border-border bg-card">
+        <CardHeader className="border-b border-border pb-4">
+          <CardTitle className="flex items-center gap-2 text-base font-semibold">
+            <DatabaseBackup className="w-4 h-4 text-primary" />
+            نسخ احتياطي للجلسات (MongoDB)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-6 space-y-5">
+          <div className="bg-muted/30 border border-border rounded-md p-3 text-xs text-muted-foreground space-y-1">
+            <p>يحفظ جلسات جميع حسابات تيليجرام في MongoDB كنسخة احتياطية.</p>
+            <p>مفيد في حالة فقدان قاعدة البيانات المحلية أو إعادة النشر — بدلاً من إعادة تسجيل دخول كل حساب.</p>
+            <p className="text-yellow-400 font-medium">⚠️ تأكد أن قاعدة MongoDB محمية بكلمة مرور — الجلسات بيانات حساسة جداً.</p>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-foreground">رابط MongoDB (Connection String)</Label>
+              <Input
+                type="password"
+                placeholder="mongodb+srv://user:password@cluster.mongodb.net"
+                value={mongoBackupUrl}
+                onChange={(e) => setMongoBackupUrl(e.target.value)}
+                className="font-mono bg-background border-border text-foreground text-xs"
+                dir="ltr"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-foreground">اسم قاعدة البيانات</Label>
+              <Input
+                placeholder="tg_backup"
+                value={mongoBackupDb}
+                onChange={(e) => setMongoBackupDb(e.target.value)}
+                className="w-48 font-mono bg-background border-border text-foreground"
+                dir="ltr"
+              />
+              <p className="text-xs text-muted-foreground">
+                سيتم إنشاء مجموعة <code className="bg-muted px-1 rounded font-mono">tg_sessions</code> تلقائياً داخل هذه القاعدة.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <Button
+              onClick={handleSaveMongoBackup}
+              disabled={updateSettings.isPending}
+              variant="outline"
+              className="flex items-center gap-2"
+            >
+              <Save className="w-4 h-4" />
+              حفظ الإعدادات
+            </Button>
+            <Button
+              onClick={handleBackupNow}
+              disabled={backupLoading || !mongoBackupUrl}
+              variant="outline"
+              className="flex items-center gap-2 border-primary/40 text-primary hover:bg-primary/10"
+            >
+              {backupLoading
+                ? <RefreshCw className="w-4 h-4 animate-spin" />
+                : <Upload className="w-4 h-4" />}
+              نسخ احتياطي الآن
+            </Button>
+            <Button
+              onClick={handleRestoreNow}
+              disabled={restoreLoading || !mongoBackupUrl}
+              variant="outline"
+              className="flex items-center gap-2 border-yellow-500/40 text-yellow-400 hover:bg-yellow-500/10"
+            >
+              {restoreLoading
+                ? <RefreshCw className="w-4 h-4 animate-spin" />
+                : <Download className="w-4 h-4" />}
+              استعادة الجلسات
+            </Button>
+          </div>
+
+          {backupResult && backupResult.ok && (
+            <div className="bg-primary/5 border border-primary/20 rounded-md p-3 text-xs text-primary font-mono space-y-1">
+              <p>✅ نسخ احتياطي مكتمل</p>
+              <p>محفوظ: <span className="font-bold">{backupResult.backedUp}</span> جلسة &nbsp;|&nbsp;
+                بدون جلسة: <span className="font-bold">{backupResult.skipped}</span> &nbsp;|&nbsp;
+                أخطاء: <span className="font-bold">{backupResult.errors}</span>
+              </p>
             </div>
           )}
         </CardContent>

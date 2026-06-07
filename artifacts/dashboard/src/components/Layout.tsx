@@ -6,7 +6,8 @@ import {
   ActivitySquare, 
   Database,
   Activity,
-  Settings
+  Settings,
+  BarChart2
 } from "lucide-react";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { NotificationBell } from "./NotificationBell";
@@ -21,6 +22,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { name: "Group Links", href: "/links", icon: LinkIcon },
     { name: "Join History", href: "/jobs", icon: ActivitySquare },
     { name: "Collections", href: "/collections", icon: Database },
+    { name: "Analytics", href: "/analytics", icon: BarChart2 },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
 

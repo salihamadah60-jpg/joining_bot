@@ -25,6 +25,7 @@ function Router() {
         <Route path="/jobs" component={Jobs} />
         <Route path="/collections" component={Collections} />
         <Route path="/settings" component={Settings} />
+        <Route path="/analytics" component={Analytics} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

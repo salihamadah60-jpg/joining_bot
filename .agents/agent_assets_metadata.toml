@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "68zZLSC71jvi5hdiwIp4Z"
+uri = "file://دليل_الاستخدام.md"
+type = "text"
+title = "دليل الاستخدام الشامل — TG_ROTATOR"

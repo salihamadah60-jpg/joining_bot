@@ -8,6 +8,8 @@ import botRouter from "./bot";
 import authRouter from "./auth";
 import settingsRouter from "./settings";
 import eventsRouter from "./events";
+import analyticsRouter from "./analytics";
+import sessionsRouter from "./sessions";
 
 const router: IRouter = Router();
 
@@ -20,5 +22,7 @@ router.use(botRouter);
 router.use(authRouter);
 router.use(settingsRouter);
 router.use(eventsRouter);
+router.use(analyticsRouter);
+router.use(sessionsRouter);
 
 export default router;

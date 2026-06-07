@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { getApiUrl } from "@/lib/api";
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -8,6 +7,8 @@ import {
 } from "recharts";
 import { TrendingUp, Users, CheckCircle, AlertCircle, Clock, Link } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+const BASE = (import.meta.env.BASE_URL as string)?.replace(/\/$/, "") ?? "";
 
 const COLORS = ["#22d3ee", "#f43f5e", "#a78bfa", "#fb923c", "#4ade80", "#facc15", "#f472b6", "#60a5fa"];
 
@@ -49,12 +50,10 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function Analytics() {
-  const base = getApiUrl();
-
   const { data: summary, isLoading: loadingSummary } = useQuery({
     queryKey: ["analytics-summary"],
     queryFn: async () => {
-      const r = await fetch(`${base}/api/analytics/summary`);
+      const r = await fetch(`${BASE}/api/analytics/summary`);
       return r.json();
     },
     refetchInterval: 30_000,
@@ -63,7 +62,7 @@ export default function Analytics() {
   const { data: daily = [], isLoading: loadingDaily } = useQuery<any[]>({
     queryKey: ["analytics-daily"],
     queryFn: async () => {
-      const r = await fetch(`${base}/api/analytics/daily?days=14`);
+      const r = await fetch(`${BASE}/api/analytics/daily?days=14`);
       return r.json();
     },
     refetchInterval: 60_000,
@@ -72,7 +71,7 @@ export default function Analytics() {
   const { data: errors = [], isLoading: loadingErrors } = useQuery<any[]>({
     queryKey: ["analytics-errors"],
     queryFn: async () => {
-      const r = await fetch(`${base}/api/analytics/errors`);
+      const r = await fetch(`${BASE}/api/analytics/errors`);
       return r.json();
     },
     refetchInterval: 60_000,
@@ -81,7 +80,7 @@ export default function Analytics() {
   const { data: accountsData = [], isLoading: loadingAccounts } = useQuery<any[]>({
     queryKey: ["analytics-accounts"],
     queryFn: async () => {
-      const r = await fetch(`${base}/api/analytics/accounts`);
+      const r = await fetch(`${BASE}/api/analytics/accounts`);
       return r.json();
     },
     refetchInterval: 30_000,
