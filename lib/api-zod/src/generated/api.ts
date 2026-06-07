@@ -3,13 +3,12 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 import * as zod from 'zod';
 
 
 /**
- * Returns server health status
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
@@ -24,14 +23,17 @@ export const ListAccountsResponseItem = zod.object({
   "id": zod.number(),
   "phone": zod.string(),
   "label": zod.string().nullish(),
-  "status": zod.enum(['active', 'paused', 'banned', 'flood_wait', 'channels_limit']),
+  "status": zod.enum(['active', 'paused', 'banned', 'flood_wait', 'channels_limit', 'needs_auth']),
+  "hasSession": zod.boolean().describe('Whether a valid Telegram session exists'),
   "joinedCount": zod.number(),
   "failedCount": zod.number(),
-  "dailyLimit": zod.number(),
-  "currentDelay": zod.number().describe('Current delay in seconds before next join'),
+  "joinedToday": zod.number().describe('Number of groups joined today'),
+  "channelsCount": zod.number().describe('Total channels\/groups this account is a member of'),
+  "dailyLimit": zod.number().describe('Max joins per 18-hour active window'),
+  "currentDelay": zod.number().describe('Base delay in seconds between joins for this account'),
   "floodWaitUntil": zod.string().nullish().describe('ISO timestamp when flood wait expires'),
-  "sessionFile": zod.string().nullish(),
-  "isPremium": zod.boolean().optional(),
+  "lastJoinAt": zod.string().nullish().describe('ISO timestamp of last successful join'),
+  "isPremium": zod.boolean(),
   "createdAt": zod.string()
 })
 export const ListAccountsResponse = zod.array(ListAccountsResponseItem)
@@ -43,7 +45,6 @@ export const ListAccountsResponse = zod.array(ListAccountsResponseItem)
 export const CreateAccountBody = zod.object({
   "phone": zod.string(),
   "label": zod.string().optional(),
-  "sessionFile": zod.string().optional(),
   "isPremium": zod.boolean().optional(),
   "dailyLimit": zod.number().optional()
 })
@@ -60,14 +61,17 @@ export const GetAccountResponse = zod.object({
   "id": zod.number(),
   "phone": zod.string(),
   "label": zod.string().nullish(),
-  "status": zod.enum(['active', 'paused', 'banned', 'flood_wait', 'channels_limit']),
+  "status": zod.enum(['active', 'paused', 'banned', 'flood_wait', 'channels_limit', 'needs_auth']),
+  "hasSession": zod.boolean().describe('Whether a valid Telegram session exists'),
   "joinedCount": zod.number(),
   "failedCount": zod.number(),
-  "dailyLimit": zod.number(),
-  "currentDelay": zod.number().describe('Current delay in seconds before next join'),
+  "joinedToday": zod.number().describe('Number of groups joined today'),
+  "channelsCount": zod.number().describe('Total channels\/groups this account is a member of'),
+  "dailyLimit": zod.number().describe('Max joins per 18-hour active window'),
+  "currentDelay": zod.number().describe('Base delay in seconds between joins for this account'),
   "floodWaitUntil": zod.string().nullish().describe('ISO timestamp when flood wait expires'),
-  "sessionFile": zod.string().nullish(),
-  "isPremium": zod.boolean().optional(),
+  "lastJoinAt": zod.string().nullish().describe('ISO timestamp of last successful join'),
+  "isPremium": zod.boolean(),
   "createdAt": zod.string()
 })
 
@@ -81,7 +85,7 @@ export const UpdateAccountParams = zod.object({
 
 export const UpdateAccountBody = zod.object({
   "label": zod.string().optional(),
-  "status": zod.enum(['active', 'paused', 'banned', 'flood_wait', 'channels_limit']).optional(),
+  "status": zod.enum(['active', 'paused', 'banned', 'flood_wait', 'channels_limit', 'needs_auth']).optional(),
   "dailyLimit": zod.number().optional(),
   "isPremium": zod.boolean().optional()
 })
@@ -90,14 +94,17 @@ export const UpdateAccountResponse = zod.object({
   "id": zod.number(),
   "phone": zod.string(),
   "label": zod.string().nullish(),
-  "status": zod.enum(['active', 'paused', 'banned', 'flood_wait', 'channels_limit']),
+  "status": zod.enum(['active', 'paused', 'banned', 'flood_wait', 'channels_limit', 'needs_auth']),
+  "hasSession": zod.boolean().describe('Whether a valid Telegram session exists'),
   "joinedCount": zod.number(),
   "failedCount": zod.number(),
-  "dailyLimit": zod.number(),
-  "currentDelay": zod.number().describe('Current delay in seconds before next join'),
+  "joinedToday": zod.number().describe('Number of groups joined today'),
+  "channelsCount": zod.number().describe('Total channels\/groups this account is a member of'),
+  "dailyLimit": zod.number().describe('Max joins per 18-hour active window'),
+  "currentDelay": zod.number().describe('Base delay in seconds between joins for this account'),
   "floodWaitUntil": zod.string().nullish().describe('ISO timestamp when flood wait expires'),
-  "sessionFile": zod.string().nullish(),
-  "isPremium": zod.boolean().optional(),
+  "lastJoinAt": zod.string().nullish().describe('ISO timestamp of last successful join'),
+  "isPremium": zod.boolean(),
   "createdAt": zod.string()
 })
 
@@ -119,8 +126,86 @@ export const GetAccountsStatsResponse = zod.object({
   "paused": zod.number(),
   "banned": zod.number(),
   "floodWait": zod.number(),
+  "needsAuth": zod.number(),
+  "channelsLimit": zod.number(),
   "totalJoined": zod.number(),
   "totalFailed": zod.number()
+})
+
+
+/**
+ * @summary Send OTP to a phone number
+ */
+export const AuthSendCodeBody = zod.object({
+  "phone": zod.string().describe('Phone number in international format (e.g. +966XXXXXXXXX)')
+})
+
+export const AuthSendCodeResponse = zod.object({
+  "sent": zod.boolean(),
+  "alreadyLoggedIn": zod.boolean().optional(),
+  "type": zod.string().optional().describe('Code delivery type (app, sms, call, etc.)'),
+  "length": zod.number().optional().describe('Length of the expected code'),
+  "timeout": zod.number().optional().describe('Seconds before resend is allowed'),
+  "nextType": zod.string().optional()
+})
+
+
+/**
+ * @summary Verify the OTP received on the phone
+ */
+export const AuthVerifyCodeBody = zod.object({
+  "phone": zod.string(),
+  "code": zod.string()
+})
+
+export const AuthVerifyCodeResponse = zod.object({
+  "success": zod.boolean().optional(),
+  "needPassword": zod.boolean().optional(),
+  "userId": zod.string().nullish(),
+  "firstName": zod.string().nullish()
+})
+
+
+/**
+ * @summary Submit Two-Step Verification (2FA) password
+ */
+export const AuthVerifyPasswordBody = zod.object({
+  "phone": zod.string(),
+  "password": zod.string()
+})
+
+export const AuthVerifyPasswordResponse = zod.object({
+  "success": zod.boolean(),
+  "userId": zod.string().nullish(),
+  "firstName": zod.string().nullish()
+})
+
+
+/**
+ * @summary Cancel in-progress auth flow
+ */
+export const AuthCancelBody = zod.object({
+  "phone": zod.string()
+})
+
+export const AuthCancelResponse = zod.object({
+  "cancelled": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Get auth status for a phone number
+ */
+export const GetAuthStatusParams = zod.object({
+  "phone": zod.coerce.string()
+})
+
+export const GetAuthStatusResponse = zod.object({
+  "phone": zod.string(),
+  "hasSession": zod.boolean(),
+  "status": zod.string(),
+  "hasPendingAuth": zod.boolean(),
+  "pendingStep": zod.string().nullish()
 })
 
 
@@ -138,8 +223,8 @@ export const ListLinksResponseItem = zod.object({
   "status": zod.enum(['pending', 'joined', 'failed', 'skipped']),
   "failReason": zod.string().nullish(),
   "groupTitle": zod.string().nullish(),
-  "groupType": zod.union([zod.literal('group'),zod.literal('channel'),zod.literal(null)]).nullish(),
-  "source": zod.string().nullish().describe('Collection name this came from'),
+  "groupType": zod.union([zod.literal('group'),zod.literal('channel'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "source": zod.string().nullish(),
   "usedByAccountId": zod.number().nullish(),
   "createdAt": zod.string(),
   "processedAt": zod.string().nullish()
@@ -217,7 +302,7 @@ export const ListCollectionsResponseItem = zod.object({
   "name": zod.string(),
   "connectionString": zod.string(),
   "dbName": zod.string().optional(),
-  "linkField": zod.string().describe('Field name in the collection containing the Telegram link'),
+  "linkField": zod.string(),
   "isActive": zod.boolean(),
   "lastSyncAt": zod.string().nullable(),
   "syncedCount": zod.number().optional(),
@@ -268,7 +353,7 @@ export const GetBotStatusResponse = zod.object({
   "currentAccountId": zod.number().nullable(),
   "currentAccountPhone": zod.string().nullish(),
   "queueSize": zod.number(),
-  "rotationInterval": zod.number().describe('Seconds between rotations based on account count'),
+  "rotationInterval": zod.number().describe('Safe per-account join interval in seconds (~1029s \/ 17.2 min)'),
   "startedAt": zod.string().nullable(),
   "totalJoinedToday": zod.number().optional(),
   "totalFailedToday": zod.number().optional()
@@ -283,7 +368,7 @@ export const StartBotResponse = zod.object({
   "currentAccountId": zod.number().nullable(),
   "currentAccountPhone": zod.string().nullish(),
   "queueSize": zod.number(),
-  "rotationInterval": zod.number().describe('Seconds between rotations based on account count'),
+  "rotationInterval": zod.number().describe('Safe per-account join interval in seconds (~1029s \/ 17.2 min)'),
   "startedAt": zod.string().nullable(),
   "totalJoinedToday": zod.number().optional(),
   "totalFailedToday": zod.number().optional()
@@ -298,7 +383,7 @@ export const StopBotResponse = zod.object({
   "currentAccountId": zod.number().nullable(),
   "currentAccountPhone": zod.string().nullish(),
   "queueSize": zod.number(),
-  "rotationInterval": zod.number().describe('Seconds between rotations based on account count'),
+  "rotationInterval": zod.number().describe('Safe per-account join interval in seconds (~1029s \/ 17.2 min)'),
   "startedAt": zod.string().nullable(),
   "totalJoinedToday": zod.number().optional(),
   "totalFailedToday": zod.number().optional()
@@ -314,6 +399,8 @@ export const GetBotActivityResponseItem = zod.object({
   "message": zod.string(),
   "accountPhone": zod.string().nullish(),
   "linkUrl": zod.string().nullish(),
+  "errorCode": zod.string().nullish(),
+  "waitSeconds": zod.number().nullish(),
   "createdAt": zod.string()
 })
 export const GetBotActivityResponse = zod.array(GetBotActivityResponseItem)

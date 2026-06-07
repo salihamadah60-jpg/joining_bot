@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 
 export type AccountUpdateStatus = typeof AccountUpdateStatus[keyof typeof AccountUpdateStatus];
@@ -15,4 +15,5 @@ export const AccountUpdateStatus = {
   banned: 'banned',
   flood_wait: 'flood_wait',
   channels_limit: 'channels_limit',
+  needs_auth: 'needs_auth',
 } as const;

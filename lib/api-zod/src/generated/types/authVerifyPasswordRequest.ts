@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.2.0
  */
 
-export interface BulkLinksInput {
-  urls: string[];
-  source?: string;
+export interface AuthVerifyPasswordRequest {
+  phone: string;
+  password: string;
 }

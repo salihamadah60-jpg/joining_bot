@@ -8,6 +8,8 @@ export const activityLogTable = pgTable("activity_log", {
   message: text("message").notNull(),
   accountPhone: text("account_phone"),
   linkUrl: text("link_url"),
+  errorCode: text("error_code"),
+  waitSeconds: integer("wait_seconds"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

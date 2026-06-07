@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 import type { AccountStatus } from './accountStatus';
 
@@ -13,18 +13,28 @@ export interface Account {
   /** @nullable */
   label?: string | null;
   status: AccountStatus;
+  /** Whether a valid Telegram session exists */
+  hasSession: boolean;
   joinedCount: number;
   failedCount: number;
+  /** Number of groups joined today */
+  joinedToday: number;
+  /** Total channels/groups this account is a member of */
+  channelsCount: number;
+  /** Max joins per 18-hour active window */
   dailyLimit: number;
-  /** Current delay in seconds before next join */
+  /** Base delay in seconds between joins for this account */
   currentDelay: number;
   /**
      * ISO timestamp when flood wait expires
      * @nullable
      */
   floodWaitUntil?: string | null;
-  /** @nullable */
-  sessionFile?: string | null;
-  isPremium?: boolean;
+  /**
+     * ISO timestamp of last successful join
+     * @nullable
+     */
+  lastJoinAt?: string | null;
+  isPremium: boolean;
   createdAt: string;
 }

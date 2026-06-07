@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.2.0
  */
 
-export interface BulkLinksInput {
-  urls: string[];
-  source?: string;
+export interface AuthSendCodeRequest {
+  /** Phone number in international format (e.g. +966XXXXXXXXX) */
+  phone: string;
 }

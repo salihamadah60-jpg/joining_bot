@@ -12,7 +12,6 @@ import {
   DeleteAccountParams,
   GetAccountsStatsResponse,
 } from "@workspace/api-zod";
-import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -24,6 +23,8 @@ router.get("/accounts/stats", async (req, res): Promise<void> => {
     paused: accounts.filter((a) => a.status === "paused").length,
     banned: accounts.filter((a) => a.status === "banned").length,
     floodWait: accounts.filter((a) => a.status === "flood_wait").length,
+    needsAuth: accounts.filter((a) => a.status === "needs_auth").length,
+    channelsLimit: accounts.filter((a) => a.status === "channels_limit").length,
     totalJoined: accounts.reduce((sum, a) => sum + a.joinedCount, 0),
     totalFailed: accounts.reduce((sum, a) => sum + a.failedCount, 0),
   };
@@ -46,7 +47,9 @@ router.post("/accounts", async (req, res): Promise<void> => {
 });
 
 router.get("/accounts/:id", async (req, res): Promise<void> => {
-  const params = GetAccountParams.safeParse({ id: Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) });
+  const params = GetAccountParams.safeParse({
+    id: Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id),
+  });
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
   const [account] = await db.select().from(accountsTable).where(eq(accountsTable.id, params.data.id));
   if (!account) { res.status(404).json({ error: "Account not found" }); return; }
@@ -54,17 +57,25 @@ router.get("/accounts/:id", async (req, res): Promise<void> => {
 });
 
 router.patch("/accounts/:id", async (req, res): Promise<void> => {
-  const params = UpdateAccountParams.safeParse({ id: Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) });
+  const params = UpdateAccountParams.safeParse({
+    id: Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id),
+  });
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
   const parsed = UpdateAccountBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-  const [account] = await db.update(accountsTable).set(parsed.data).where(eq(accountsTable.id, params.data.id)).returning();
+  const [account] = await db
+    .update(accountsTable)
+    .set(parsed.data)
+    .where(eq(accountsTable.id, params.data.id))
+    .returning();
   if (!account) { res.status(404).json({ error: "Account not found" }); return; }
   res.json(UpdateAccountResponse.parse(serializeAccount(account)));
 });
 
 router.delete("/accounts/:id", async (req, res): Promise<void> => {
-  const params = DeleteAccountParams.safeParse({ id: Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) });
+  const params = DeleteAccountParams.safeParse({
+    id: Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id),
+  });
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
   const [deleted] = await db.delete(accountsTable).where(eq(accountsTable.id, params.data.id)).returning();
   if (!deleted) { res.status(404).json({ error: "Account not found" }); return; }
@@ -74,7 +85,12 @@ router.delete("/accounts/:id", async (req, res): Promise<void> => {
 function serializeAccount(a: typeof accountsTable.$inferSelect) {
   return {
     ...a,
+    hasSession: !!a.sessionString,
+    sessionString: undefined, // Never expose the session string via API
     floodWaitUntil: a.floodWaitUntil ? a.floodWaitUntil.toISOString() : null,
+    lastJoinAt: a.lastJoinAt ? a.lastJoinAt.toISOString() : null,
+    nextJoinAllowedAt: a.nextJoinAllowedAt ? a.nextJoinAllowedAt.toISOString() : null,
+    dailyResetAt: a.dailyResetAt ? a.dailyResetAt.toISOString() : null,
     createdAt: a.createdAt.toISOString(),
   };
 }

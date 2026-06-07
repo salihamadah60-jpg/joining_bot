@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 
 export * from './account';
@@ -14,6 +14,15 @@ export * from './accountUpdate';
 export * from './accountUpdateStatus';
 export * from './activityEntry';
 export * from './activityEntryType';
+export * from './authCancel200';
+export * from './authCancelBody';
+export * from './authSendCodeRequest';
+export * from './authSendCodeResponse';
+export * from './authStatusResponse';
+export * from './authSuccessResponse';
+export * from './authVerifyCodeRequest';
+export * from './authVerifyCodeResponse';
+export * from './authVerifyPasswordRequest';
 export * from './botStatus';
 export * from './bulkAddResult';
 export * from './bulkLinksInput';

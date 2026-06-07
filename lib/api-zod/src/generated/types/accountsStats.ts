@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 
 export interface AccountsStats {
@@ -12,6 +12,8 @@ export interface AccountsStats {
   paused: number;
   banned: number;
   floodWait: number;
+  needsAuth: number;
+  channelsLimit: number;
   totalJoined: number;
   totalFailed: number;
 }

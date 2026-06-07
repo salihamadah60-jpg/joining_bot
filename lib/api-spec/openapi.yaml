@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
-  version: 0.1.0
+  version: 0.2.0
   description: Telegram Multi-Account Bot Manager API
 servers:
   - url: /api
@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: accounts
     description: Telegram account management
+  - name: auth
+    description: Telegram account authentication (OTP / 2FA)
   - name: links
     description: Group links management
   - name: jobs
@@ -26,7 +28,6 @@ paths:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -136,6 +137,110 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AccountsStats"
+
+  /auth/send-code:
+    post:
+      operationId: authSendCode
+      tags: [auth]
+      summary: Send OTP to a phone number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthSendCodeRequest"
+      responses:
+        "200":
+          description: Code sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSendCodeResponse"
+
+  /auth/verify-code:
+    post:
+      operationId: authVerifyCode
+      tags: [auth]
+      summary: Verify the OTP received on the phone
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthVerifyCodeRequest"
+      responses:
+        "200":
+          description: Verified or needs 2FA password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthVerifyCodeResponse"
+
+  /auth/verify-password:
+    post:
+      operationId: authVerifyPassword
+      tags: [auth]
+      summary: Submit Two-Step Verification (2FA) password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthVerifyPasswordRequest"
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSuccessResponse"
+
+  /auth/cancel:
+    post:
+      operationId: authCancel
+      tags: [auth]
+      summary: Cancel in-progress auth flow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+      responses:
+        "200":
+          description: Cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cancelled:
+                    type: boolean
+
+  /auth/status/{phone}:
+    get:
+      operationId: getAuthStatus
+      tags: [auth]
+      summary: Get auth status for a phone number
+      parameters:
+        - name: phone
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Auth status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatusResponse"
+        "404":
+          description: Account not found
 
   /links:
     get:
@@ -383,7 +488,7 @@ components:
 
     Account:
       type: object
-      required: [id, phone, status, joinedCount, failedCount, dailyLimit, currentDelay, createdAt]
+      required: [id, phone, status, joinedCount, failedCount, dailyLimit, currentDelay, joinedToday, channelsCount, hasSession, isPremium, createdAt]
       properties:
         id:
           type: integer
@@ -393,21 +498,32 @@ components:
           type: ["string", "null"]
         status:
           type: string
-          enum: [active, paused, banned, flood_wait, channels_limit]
+          enum: [active, paused, banned, flood_wait, channels_limit, needs_auth]
+        hasSession:
+          type: boolean
+          description: Whether a valid Telegram session exists
         joinedCount:
           type: integer
         failedCount:
           type: integer
+        joinedToday:
+          type: integer
+          description: Number of groups joined today
+        channelsCount:
+          type: integer
+          description: Total channels/groups this account is a member of
         dailyLimit:
           type: integer
+          description: Max joins per 18-hour active window
         currentDelay:
           type: integer
-          description: Current delay in seconds before next join
+          description: Base delay in seconds between joins for this account
         floodWaitUntil:
           type: ["string", "null"]
           description: ISO timestamp when flood wait expires
-        sessionFile:
+        lastJoinAt:
           type: ["string", "null"]
+          description: ISO timestamp of last successful join
         isPremium:
           type: boolean
         createdAt:
@@ -421,8 +537,6 @@ components:
           type: string
         label:
           type: string
-        sessionFile:
-          type: string
         isPremium:
           type: boolean
         dailyLimit:
@@ -435,7 +549,7 @@ components:
           type: string
         status:
           type: string
-          enum: [active, paused, banned, flood_wait, channels_limit]
+          enum: [active, paused, banned, flood_wait, channels_limit, needs_auth]
         dailyLimit:
           type: integer
         isPremium:
@@ -443,7 +557,7 @@ components:
 
     AccountsStats:
       type: object
-      required: [total, active, paused, banned, floodWait, totalJoined, totalFailed]
+      required: [total, active, paused, banned, floodWait, needsAuth, channelsLimit, totalJoined, totalFailed]
       properties:
         total:
           type: integer
@@ -455,10 +569,99 @@ components:
           type: integer
         floodWait:
           type: integer
+        needsAuth:
+          type: integer
+        channelsLimit:
+          type: integer
         totalJoined:
           type: integer
         totalFailed:
           type: integer
+
+    AuthSendCodeRequest:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+          description: Phone number in international format (e.g. +966XXXXXXXXX)
+
+    AuthSendCodeResponse:
+      type: object
+      required: [sent]
+      properties:
+        sent:
+          type: boolean
+        alreadyLoggedIn:
+          type: boolean
+        type:
+          type: string
+          description: Code delivery type (app, sms, call, etc.)
+        length:
+          type: integer
+          description: Length of the expected code
+        timeout:
+          type: integer
+          description: Seconds before resend is allowed
+        nextType:
+          type: string
+
+    AuthVerifyCodeRequest:
+      type: object
+      required: [phone, code]
+      properties:
+        phone:
+          type: string
+        code:
+          type: string
+
+    AuthVerifyCodeResponse:
+      type: object
+      required: []
+      properties:
+        success:
+          type: boolean
+        needPassword:
+          type: boolean
+        userId:
+          type: ["string", "null"]
+        firstName:
+          type: ["string", "null"]
+
+    AuthVerifyPasswordRequest:
+      type: object
+      required: [phone, password]
+      properties:
+        phone:
+          type: string
+        password:
+          type: string
+
+    AuthSuccessResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        userId:
+          type: ["string", "null"]
+        firstName:
+          type: ["string", "null"]
+
+    AuthStatusResponse:
+      type: object
+      required: [phone, hasSession, status, hasPendingAuth]
+      properties:
+        phone:
+          type: string
+        hasSession:
+          type: boolean
+        status:
+          type: string
+        hasPendingAuth:
+          type: boolean
+        pendingStep:
+          type: ["string", "null"]
 
     GroupLink:
       type: object
@@ -477,10 +680,9 @@ components:
           type: ["string", "null"]
         groupType:
           type: ["string", "null"]
-          enum: [group, channel, null]
+          enum: [group, channel, unknown, null]
         source:
           type: ["string", "null"]
-          description: Collection name this came from
         usedByAccountId:
           type: ["integer", "null"]
         createdAt:
@@ -572,7 +774,6 @@ components:
           type: string
         linkField:
           type: string
-          description: Field name in the collection containing the Telegram link
         isActive:
           type: boolean
         lastSyncAt:
@@ -622,7 +823,7 @@ components:
           type: integer
         rotationInterval:
           type: integer
-          description: Seconds between rotations based on account count
+          description: Safe per-account join interval in seconds (~1029s / 17.2 min)
         startedAt:
           type: ["string", "null"]
         totalJoinedToday:
@@ -645,5 +846,9 @@ components:
           type: ["string", "null"]
         linkUrl:
           type: ["string", "null"]
+        errorCode:
+          type: ["string", "null"]
+        waitSeconds:
+          type: ["integer", "null"]
         createdAt:
           type: string

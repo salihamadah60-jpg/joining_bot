@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 import {
   useMutation,
@@ -25,6 +25,15 @@ import type {
   AccountUpdate,
   AccountsStats,
   ActivityEntry,
+  AuthCancel200,
+  AuthCancelBody,
+  AuthSendCodeRequest,
+  AuthSendCodeResponse,
+  AuthStatusResponse,
+  AuthSuccessResponse,
+  AuthVerifyCodeRequest,
+  AuthVerifyCodeResponse,
+  AuthVerifyPasswordRequest,
   BotStatus,
   BulkAddResult,
   BulkLinksInput,
@@ -61,7 +70,6 @@ export const getHealthCheckUrl = () => {
 }
 
 /**
- * Returns server health status
  * @summary Health check
  */
 export const healthCheck = async ( options?: RequestInit): Promise<HealthStatus> => {
@@ -562,6 +570,367 @@ export function useGetAccountsStats<TData = Awaited<ReturnType<typeof getAccount
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAccountsStatsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getAuthSendCodeUrl = () => {
+
+
+
+
+  return `/api/auth/send-code`
+}
+
+/**
+ * @summary Send OTP to a phone number
+ */
+export const authSendCode = async (authSendCodeRequest: AuthSendCodeRequest, options?: RequestInit): Promise<AuthSendCodeResponse> => {
+
+  return customFetch<AuthSendCodeResponse>(getAuthSendCodeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      authSendCodeRequest,)
+  }
+);}
+
+
+
+
+export const getAuthSendCodeMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authSendCode>>, TError,{data: BodyType<AuthSendCodeRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof authSendCode>>, TError,{data: BodyType<AuthSendCodeRequest>}, TContext> => {
+
+const mutationKey = ['authSendCode'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof authSendCode>>, {data: BodyType<AuthSendCodeRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  authSendCode(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AuthSendCodeMutationResult = NonNullable<Awaited<ReturnType<typeof authSendCode>>>
+    export type AuthSendCodeMutationBody = BodyType<AuthSendCodeRequest>
+    export type AuthSendCodeMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Send OTP to a phone number
+ */
+export const useAuthSendCode = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authSendCode>>, TError,{data: BodyType<AuthSendCodeRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof authSendCode>>,
+        TError,
+        {data: BodyType<AuthSendCodeRequest>},
+        TContext
+      > => {
+      return useMutation(getAuthSendCodeMutationOptions(options));
+    }
+
+export const getAuthVerifyCodeUrl = () => {
+
+
+
+
+  return `/api/auth/verify-code`
+}
+
+/**
+ * @summary Verify the OTP received on the phone
+ */
+export const authVerifyCode = async (authVerifyCodeRequest: AuthVerifyCodeRequest, options?: RequestInit): Promise<AuthVerifyCodeResponse> => {
+
+  return customFetch<AuthVerifyCodeResponse>(getAuthVerifyCodeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      authVerifyCodeRequest,)
+  }
+);}
+
+
+
+
+export const getAuthVerifyCodeMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authVerifyCode>>, TError,{data: BodyType<AuthVerifyCodeRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof authVerifyCode>>, TError,{data: BodyType<AuthVerifyCodeRequest>}, TContext> => {
+
+const mutationKey = ['authVerifyCode'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof authVerifyCode>>, {data: BodyType<AuthVerifyCodeRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  authVerifyCode(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AuthVerifyCodeMutationResult = NonNullable<Awaited<ReturnType<typeof authVerifyCode>>>
+    export type AuthVerifyCodeMutationBody = BodyType<AuthVerifyCodeRequest>
+    export type AuthVerifyCodeMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Verify the OTP received on the phone
+ */
+export const useAuthVerifyCode = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authVerifyCode>>, TError,{data: BodyType<AuthVerifyCodeRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof authVerifyCode>>,
+        TError,
+        {data: BodyType<AuthVerifyCodeRequest>},
+        TContext
+      > => {
+      return useMutation(getAuthVerifyCodeMutationOptions(options));
+    }
+
+export const getAuthVerifyPasswordUrl = () => {
+
+
+
+
+  return `/api/auth/verify-password`
+}
+
+/**
+ * @summary Submit Two-Step Verification (2FA) password
+ */
+export const authVerifyPassword = async (authVerifyPasswordRequest: AuthVerifyPasswordRequest, options?: RequestInit): Promise<AuthSuccessResponse> => {
+
+  return customFetch<AuthSuccessResponse>(getAuthVerifyPasswordUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      authVerifyPasswordRequest,)
+  }
+);}
+
+
+
+
+export const getAuthVerifyPasswordMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authVerifyPassword>>, TError,{data: BodyType<AuthVerifyPasswordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof authVerifyPassword>>, TError,{data: BodyType<AuthVerifyPasswordRequest>}, TContext> => {
+
+const mutationKey = ['authVerifyPassword'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof authVerifyPassword>>, {data: BodyType<AuthVerifyPasswordRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  authVerifyPassword(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AuthVerifyPasswordMutationResult = NonNullable<Awaited<ReturnType<typeof authVerifyPassword>>>
+    export type AuthVerifyPasswordMutationBody = BodyType<AuthVerifyPasswordRequest>
+    export type AuthVerifyPasswordMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Submit Two-Step Verification (2FA) password
+ */
+export const useAuthVerifyPassword = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authVerifyPassword>>, TError,{data: BodyType<AuthVerifyPasswordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof authVerifyPassword>>,
+        TError,
+        {data: BodyType<AuthVerifyPasswordRequest>},
+        TContext
+      > => {
+      return useMutation(getAuthVerifyPasswordMutationOptions(options));
+    }
+
+export const getAuthCancelUrl = () => {
+
+
+
+
+  return `/api/auth/cancel`
+}
+
+/**
+ * @summary Cancel in-progress auth flow
+ */
+export const authCancel = async (authCancelBody: AuthCancelBody, options?: RequestInit): Promise<AuthCancel200> => {
+
+  return customFetch<AuthCancel200>(getAuthCancelUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      authCancelBody,)
+  }
+);}
+
+
+
+
+export const getAuthCancelMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authCancel>>, TError,{data: BodyType<AuthCancelBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof authCancel>>, TError,{data: BodyType<AuthCancelBody>}, TContext> => {
+
+const mutationKey = ['authCancel'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof authCancel>>, {data: BodyType<AuthCancelBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  authCancel(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AuthCancelMutationResult = NonNullable<Awaited<ReturnType<typeof authCancel>>>
+    export type AuthCancelMutationBody = BodyType<AuthCancelBody>
+    export type AuthCancelMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Cancel in-progress auth flow
+ */
+export const useAuthCancel = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authCancel>>, TError,{data: BodyType<AuthCancelBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof authCancel>>,
+        TError,
+        {data: BodyType<AuthCancelBody>},
+        TContext
+      > => {
+      return useMutation(getAuthCancelMutationOptions(options));
+    }
+
+export const getGetAuthStatusUrl = (phone: string,) => {
+
+
+
+
+  return `/api/auth/status/${phone}`
+}
+
+/**
+ * @summary Get auth status for a phone number
+ */
+export const getAuthStatus = async (phone: string, options?: RequestInit): Promise<AuthStatusResponse> => {
+
+  return customFetch<AuthStatusResponse>(getGetAuthStatusUrl(phone),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAuthStatusQueryKey = (phone: string,) => {
+    return [
+    `/api/auth/status/${phone}`
+    ] as const;
+    }
+
+
+export const getGetAuthStatusQueryOptions = <TData = Awaited<ReturnType<typeof getAuthStatus>>, TError = ErrorType<void>>(phone: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAuthStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAuthStatusQueryKey(phone);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAuthStatus>>> = ({ signal }) => getAuthStatus(phone, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(phone), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAuthStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAuthStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getAuthStatus>>>
+export type GetAuthStatusQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get auth status for a phone number
+ */
+
+export function useGetAuthStatus<TData = Awaited<ReturnType<typeof getAuthStatus>>, TError = ErrorType<void>>(
+ phone: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAuthStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAuthStatusQueryOptions(phone,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

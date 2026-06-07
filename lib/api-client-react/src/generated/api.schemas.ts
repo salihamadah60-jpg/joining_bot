@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 export interface HealthStatus {
   status: string;
@@ -18,6 +18,7 @@ export const AccountStatus = {
   banned: 'banned',
   flood_wait: 'flood_wait',
   channels_limit: 'channels_limit',
+  needs_auth: 'needs_auth',
 } as const;
 
 export interface Account {
@@ -26,26 +27,35 @@ export interface Account {
   /** @nullable */
   label?: string | null;
   status: AccountStatus;
+  /** Whether a valid Telegram session exists */
+  hasSession: boolean;
   joinedCount: number;
   failedCount: number;
+  /** Number of groups joined today */
+  joinedToday: number;
+  /** Total channels/groups this account is a member of */
+  channelsCount: number;
+  /** Max joins per 18-hour active window */
   dailyLimit: number;
-  /** Current delay in seconds before next join */
+  /** Base delay in seconds between joins for this account */
   currentDelay: number;
   /**
      * ISO timestamp when flood wait expires
      * @nullable
      */
   floodWaitUntil?: string | null;
-  /** @nullable */
-  sessionFile?: string | null;
-  isPremium?: boolean;
+  /**
+     * ISO timestamp of last successful join
+     * @nullable
+     */
+  lastJoinAt?: string | null;
+  isPremium: boolean;
   createdAt: string;
 }
 
 export interface AccountInput {
   phone: string;
   label?: string;
-  sessionFile?: string;
   isPremium?: boolean;
   dailyLimit?: number;
 }
@@ -59,6 +69,7 @@ export const AccountUpdateStatus = {
   banned: 'banned',
   flood_wait: 'flood_wait',
   channels_limit: 'channels_limit',
+  needs_auth: 'needs_auth',
 } as const;
 
 export interface AccountUpdate {
@@ -74,8 +85,63 @@ export interface AccountsStats {
   paused: number;
   banned: number;
   floodWait: number;
+  needsAuth: number;
+  channelsLimit: number;
   totalJoined: number;
   totalFailed: number;
+}
+
+export interface AuthSendCodeRequest {
+  /** Phone number in international format (e.g. +966XXXXXXXXX) */
+  phone: string;
+}
+
+export interface AuthSendCodeResponse {
+  sent: boolean;
+  alreadyLoggedIn?: boolean;
+  /** Code delivery type (app, sms, call, etc.) */
+  type?: string;
+  /** Length of the expected code */
+  length?: number;
+  /** Seconds before resend is allowed */
+  timeout?: number;
+  nextType?: string;
+}
+
+export interface AuthVerifyCodeRequest {
+  phone: string;
+  code: string;
+}
+
+export interface AuthVerifyCodeResponse {
+  success?: boolean;
+  needPassword?: boolean;
+  /** @nullable */
+  userId?: string | null;
+  /** @nullable */
+  firstName?: string | null;
+}
+
+export interface AuthVerifyPasswordRequest {
+  phone: string;
+  password: string;
+}
+
+export interface AuthSuccessResponse {
+  success: boolean;
+  /** @nullable */
+  userId?: string | null;
+  /** @nullable */
+  firstName?: string | null;
+}
+
+export interface AuthStatusResponse {
+  phone: string;
+  hasSession: boolean;
+  status: string;
+  hasPendingAuth: boolean;
+  /** @nullable */
+  pendingStep?: string | null;
 }
 
 export type GroupLinkStatus = typeof GroupLinkStatus[keyof typeof GroupLinkStatus];
@@ -97,6 +163,7 @@ export type GroupLinkGroupType = typeof GroupLinkGroupType[keyof typeof GroupLin
 export const GroupLinkGroupType = {
   group: 'group',
   channel: 'channel',
+  unknown: 'unknown',
 } as const;
 
 export interface GroupLink {
@@ -109,10 +176,7 @@ export interface GroupLink {
   groupTitle?: string | null;
   /** @nullable */
   groupType?: GroupLinkGroupType;
-  /**
-     * Collection name this came from
-     * @nullable
-     */
+  /** @nullable */
   source?: string | null;
   /** @nullable */
   usedByAccountId?: number | null;
@@ -176,7 +240,6 @@ export interface Collection {
   name: string;
   connectionString: string;
   dbName?: string;
-  /** Field name in the collection containing the Telegram link */
   linkField: string;
   isActive: boolean;
   /** @nullable */
@@ -206,7 +269,7 @@ export interface BotStatus {
   /** @nullable */
   currentAccountPhone?: string | null;
   queueSize: number;
-  /** Seconds between rotations based on account count */
+  /** Safe per-account join interval in seconds (~1029s / 17.2 min) */
   rotationInterval: number;
   /** @nullable */
   startedAt: string | null;
@@ -236,8 +299,20 @@ export interface ActivityEntry {
   accountPhone?: string | null;
   /** @nullable */
   linkUrl?: string | null;
+  /** @nullable */
+  errorCode?: string | null;
+  /** @nullable */
+  waitSeconds?: number | null;
   createdAt: string;
 }
+
+export type AuthCancelBody = {
+  phone: string;
+};
+
+export type AuthCancel200 = {
+  cancelled?: boolean;
+};
 
 export type ListLinksParams = {
 status?: ListLinksStatus;

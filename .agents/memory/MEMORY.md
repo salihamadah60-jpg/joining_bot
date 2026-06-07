@@ -1,0 +1,1 @@
+- [Telegram Bot Manager Setup](telegram-bot-setup.md) — better-sqlite3 native build, drizzle-orm dual instance fix, auth flow, engine design

@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 
 export interface BotStatus {
@@ -13,7 +13,7 @@ export interface BotStatus {
   /** @nullable */
   currentAccountPhone?: string | null;
   queueSize: number;
-  /** Seconds between rotations based on account count */
+  /** Safe per-account join interval in seconds (~1029s / 17.2 min) */
   rotationInterval: number;
   /** @nullable */
   startedAt: string | null;

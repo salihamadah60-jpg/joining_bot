@@ -6,6 +6,11 @@
  * OpenAPI spec version: 0.2.0
  */
 
-export interface HealthStatus {
+export interface AuthStatusResponse {
+  phone: string;
+  hasSession: boolean;
   status: string;
+  hasPendingAuth: boolean;
+  /** @nullable */
+  pendingStep?: string | null;
 }

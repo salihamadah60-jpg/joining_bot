@@ -70,6 +70,7 @@ autoInstallPeers: false
 
 onlyBuiltDependencies:
   - '@swc/core'
+  - better-sqlite3
   - esbuild
   - msw
   - unrs-resolver
@@ -158,3 +159,9 @@ overrides:
   # drizzle-kit uses esbuild internally on an older version that's vulnerable, this overrides it
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
   esbuild: "0.27.3"
+  # Prevent better-sqlite3 from being resolved as a peer of drizzle-orm.
+  # @mtcute/node uses better-sqlite3 for its own SQLite session storage;
+  # drizzle-orm in this project uses pg only. Without this override pnpm
+  # creates two separate drizzle-orm instances (with/without better-sqlite3)
+  # whose private TypeScript types become incompatible.
+  "drizzle-orm>better-sqlite3": "-"
