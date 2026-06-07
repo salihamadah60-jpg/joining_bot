@@ -3,13 +3,23 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Telegram Multi-Account Bot Manager API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: accounts
+    description: Telegram account management
+  - name: links
+    description: Group links management
+  - name: jobs
+    description: Join job tracking
+  - name: collections
+    description: MongoDB collection management
+  - name: bot
+    description: Bot control and status
 paths:
   /healthz:
     get:
@@ -24,6 +34,343 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /accounts:
+    get:
+      operationId: listAccounts
+      tags: [accounts]
+      summary: List all Telegram accounts
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+    post:
+      operationId: createAccount
+      tags: [accounts]
+      summary: Add a new Telegram account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+
+  /accounts/{id}:
+    get:
+      operationId: getAccount
+      tags: [accounts]
+      summary: Get account by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Account details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateAccount
+      tags: [accounts]
+      summary: Update account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+    delete:
+      operationId: deleteAccount
+      tags: [accounts]
+      summary: Delete account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /accounts/stats:
+    get:
+      operationId: getAccountsStats
+      tags: [accounts]
+      summary: Get aggregated stats for all accounts
+      responses:
+        "200":
+          description: Account statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountsStats"
+
+  /links:
+    get:
+      operationId: listLinks
+      tags: [links]
+      summary: List all group links
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, joined, failed, skipped]
+        - name: source
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of links
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GroupLink"
+    post:
+      operationId: addLink
+      tags: [links]
+      summary: Add a new group link manually
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupLink"
+
+  /links/bulk:
+    post:
+      operationId: bulkAddLinks
+      tags: [links]
+      summary: Add multiple links at once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkLinksInput"
+      responses:
+        "201":
+          description: Bulk added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkAddResult"
+
+  /links/{id}:
+    delete:
+      operationId: deleteLink
+      tags: [links]
+      summary: Delete a link
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /links/stats:
+    get:
+      operationId: getLinksStats
+      tags: [links]
+      summary: Get link processing statistics
+      responses:
+        "200":
+          description: Links statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinksStats"
+
+  /jobs:
+    get:
+      operationId: listJobs
+      tags: [jobs]
+      summary: List recent join jobs
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: accountId
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JoinJob"
+
+  /collections:
+    get:
+      operationId: listCollections
+      tags: [collections]
+      summary: List all MongoDB collections configured as link sources
+      responses:
+        "200":
+          description: List of collections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Collection"
+    post:
+      operationId: addCollection
+      tags: [collections]
+      summary: Add a MongoDB collection as a link source
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CollectionInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Collection"
+
+  /collections/{id}:
+    delete:
+      operationId: deleteCollection
+      tags: [collections]
+      summary: Remove a collection source
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /collections/{id}/sync:
+    post:
+      operationId: syncCollection
+      tags: [collections]
+      summary: Manually sync links from a MongoDB collection
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Sync result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncResult"
+
+  /bot/status:
+    get:
+      operationId: getBotStatus
+      tags: [bot]
+      summary: Get current bot running status
+      responses:
+        "200":
+          description: Bot status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/start:
+    post:
+      operationId: startBot
+      tags: [bot]
+      summary: Start the bot rotation cycle
+      responses:
+        "200":
+          description: Started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/stop:
+    post:
+      operationId: stopBot
+      tags: [bot]
+      summary: Stop the bot rotation cycle
+      responses:
+        "200":
+          description: Stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/activity:
+    get:
+      operationId: getBotActivity
+      tags: [bot]
+      summary: Get recent bot activity feed
+      responses:
+        "200":
+          description: Activity log
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityEntry"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +381,269 @@ components:
       required:
         - status
 
+    Account:
+      type: object
+      required: [id, phone, status, joinedCount, failedCount, dailyLimit, currentDelay, createdAt]
+      properties:
+        id:
+          type: integer
+        phone:
+          type: string
+        label:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [active, paused, banned, flood_wait, channels_limit]
+        joinedCount:
+          type: integer
+        failedCount:
+          type: integer
+        dailyLimit:
+          type: integer
+        currentDelay:
+          type: integer
+          description: Current delay in seconds before next join
+        floodWaitUntil:
+          type: ["string", "null"]
+          description: ISO timestamp when flood wait expires
+        sessionFile:
+          type: ["string", "null"]
+        isPremium:
+          type: boolean
+        createdAt:
+          type: string
+
+    AccountInput:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+        label:
+          type: string
+        sessionFile:
+          type: string
+        isPremium:
+          type: boolean
+        dailyLimit:
+          type: integer
+
+    AccountUpdate:
+      type: object
+      properties:
+        label:
+          type: string
+        status:
+          type: string
+          enum: [active, paused, banned, flood_wait, channels_limit]
+        dailyLimit:
+          type: integer
+        isPremium:
+          type: boolean
+
+    AccountsStats:
+      type: object
+      required: [total, active, paused, banned, floodWait, totalJoined, totalFailed]
+      properties:
+        total:
+          type: integer
+        active:
+          type: integer
+        paused:
+          type: integer
+        banned:
+          type: integer
+        floodWait:
+          type: integer
+        totalJoined:
+          type: integer
+        totalFailed:
+          type: integer
+
+    GroupLink:
+      type: object
+      required: [id, url, status, createdAt]
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+        status:
+          type: string
+          enum: [pending, joined, failed, skipped]
+        failReason:
+          type: ["string", "null"]
+        groupTitle:
+          type: ["string", "null"]
+        groupType:
+          type: ["string", "null"]
+          enum: [group, channel, null]
+        source:
+          type: ["string", "null"]
+          description: Collection name this came from
+        usedByAccountId:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+        processedAt:
+          type: ["string", "null"]
+
+    LinkInput:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+        source:
+          type: string
+
+    BulkLinksInput:
+      type: object
+      required: [urls]
+      properties:
+        urls:
+          type: array
+          items:
+            type: string
+        source:
+          type: string
+
+    BulkAddResult:
+      type: object
+      required: [added, duplicates, total]
+      properties:
+        added:
+          type: integer
+        duplicates:
+          type: integer
+        total:
+          type: integer
+
+    LinksStats:
+      type: object
+      required: [total, pending, joined, failed, skipped]
+      properties:
+        total:
+          type: integer
+        pending:
+          type: integer
+        joined:
+          type: integer
+        failed:
+          type: integer
+        skipped:
+          type: integer
+
+    JoinJob:
+      type: object
+      required: [id, accountId, linkId, status, createdAt]
+      properties:
+        id:
+          type: integer
+        accountId:
+          type: integer
+        accountPhone:
+          type: ["string", "null"]
+        linkId:
+          type: integer
+        linkUrl:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [success, failed, skipped, flood_wait]
+        errorCode:
+          type: ["string", "null"]
+        errorMessage:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    Collection:
+      type: object
+      required: [id, name, connectionString, linkField, isActive, lastSyncAt, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        connectionString:
+          type: string
+        dbName:
+          type: string
+        linkField:
+          type: string
+          description: Field name in the collection containing the Telegram link
+        isActive:
+          type: boolean
+        lastSyncAt:
+          type: ["string", "null"]
+        syncedCount:
+          type: integer
+        createdAt:
+          type: string
+
+    CollectionInput:
+      type: object
+      required: [name, connectionString, dbName, linkField]
+      properties:
+        name:
+          type: string
+        connectionString:
+          type: string
+        dbName:
+          type: string
+        linkField:
+          type: string
+        isActive:
+          type: boolean
+
+    SyncResult:
+      type: object
+      required: [synced, duplicates, errors]
+      properties:
+        synced:
+          type: integer
+        duplicates:
+          type: integer
+        errors:
+          type: integer
+
+    BotStatus:
+      type: object
+      required: [running, currentAccountId, queueSize, rotationInterval, startedAt]
+      properties:
+        running:
+          type: boolean
+        currentAccountId:
+          type: ["integer", "null"]
+        currentAccountPhone:
+          type: ["string", "null"]
+        queueSize:
+          type: integer
+        rotationInterval:
+          type: integer
+          description: Seconds between rotations based on account count
+        startedAt:
+          type: ["string", "null"]
+        totalJoinedToday:
+          type: integer
+        totalFailedToday:
+          type: integer
+
+    ActivityEntry:
+      type: object
+      required: [id, type, message, createdAt]
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [join_success, join_failed, join_skipped, flood_wait, account_switched, bot_started, bot_stopped, sync_completed]
+        message:
+          type: string
+        accountPhone:
+          type: ["string", "null"]
+        linkUrl:
+          type: ["string", "null"]
+        createdAt:
+          type: string

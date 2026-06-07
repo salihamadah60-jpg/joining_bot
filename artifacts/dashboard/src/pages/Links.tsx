@@ -1,0 +1,157 @@
+import { useState } from "react";
+import { useListLinks, useBulkAddLinks, useDeleteLink } from "@workspace/api-client-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Link as LinkIcon, Plus, Trash2, Filter } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
+import { format } from "date-fns";
+
+export default function Links() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  
+  const { data: links } = useListLinks({ 
+    status: statusFilter !== "all" ? statusFilter as any : undefined 
+  });
+  
+  const deleteLink = useDeleteLink();
+  const bulkAddLinks = useBulkAddLinks();
+
+  const [isBulkOpen, setIsBulkOpen] = useState(false);
+  const [bulkUrls, setBulkUrls] = useState("");
+
+  const handleBulkAdd = () => {
+    const urls = bulkUrls.split('\n').map(u => u.trim()).filter(u => u.length > 0);
+    if (urls.length === 0) return;
+
+    bulkAddLinks.mutate({ data: { urls } }, {
+      onSuccess: (data) => {
+        queryClient.invalidateQueries({ queryKey: ["/api/links"] });
+        setIsBulkOpen(false);
+        setBulkUrls("");
+        toast({ title: "Links Added", description: `Added ${data.added} links. ${data.duplicates} duplicates skipped.` });
+      }
+    });
+  };
+
+  const handleDelete = (id: number) => {
+    deleteLink.mutate({ id }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["/api/links"] });
+        toast({ title: "Link Deleted" });
+      }
+    });
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch(status) {
+      case 'pending': return <Badge variant="outline" className="border-yellow-500 text-yellow-500">PENDING</Badge>;
+      case 'joined': return <Badge className="bg-primary text-primary-foreground">JOINED</Badge>;
+      case 'failed': return <Badge variant="destructive">FAILED</Badge>;
+      case 'skipped': return <Badge variant="secondary">SKIPPED</Badge>;
+      default: return <Badge variant="outline">{status.toUpperCase()}</Badge>;
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold font-mono flex items-center gap-2">
+          <LinkIcon className="w-6 h-6 text-primary" />
+          TARGET_LINKS
+        </h1>
+        
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-muted-foreground" />
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[180px] font-mono">
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">ALL_STATUSES</SelectItem>
+                <SelectItem value="pending">PENDING</SelectItem>
+                <SelectItem value="joined">JOINED</SelectItem>
+                <SelectItem value="failed">FAILED</SelectItem>
+                <SelectItem value="skipped">SKIPPED</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Dialog open={isBulkOpen} onOpenChange={setIsBulkOpen}>
+            <DialogTrigger asChild>
+              <Button className="font-mono">
+                <Plus className="w-4 h-4 mr-2" /> BULK_ADD_LINKS
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="border-card-border bg-card max-w-2xl">
+              <DialogHeader>
+                <DialogTitle className="font-mono">PASTE_TARGET_LINKS</DialogTitle>
+              </DialogHeader>
+              <div className="py-4">
+                <Textarea 
+                  value={bulkUrls} 
+                  onChange={(e) => setBulkUrls(e.target.value)} 
+                  placeholder="https://t.me/group1&#10;https://t.me/group2" 
+                  className="bg-background border-input min-h-[200px] font-mono text-sm" 
+                />
+              </div>
+              <DialogFooter>
+                <Button onClick={handleBulkAdd} disabled={!bulkUrls || bulkAddLinks.isPending} className="font-mono w-full">INJECT_TARGETS</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      <Card className="border-card-border">
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader className="bg-muted/50">
+              <TableRow className="border-card-border hover:bg-transparent">
+                <TableHead className="font-mono">URL</TableHead>
+                <TableHead className="font-mono">STATUS</TableHead>
+                <TableHead className="font-mono">SOURCE</TableHead>
+                <TableHead className="font-mono">ADDED_AT</TableHead>
+                <TableHead className="font-mono text-right">ACTIONS</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className="font-mono text-sm">
+              {links?.map((link) => (
+                <TableRow key={link.id} className="border-card-border">
+                  <TableCell className="font-medium truncate max-w-[250px]">{link.url}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-col gap-1 items-start">
+                      {getStatusBadge(link.status)}
+                      {link.failReason && <span className="text-[10px] text-destructive max-w-[200px] truncate" title={link.failReason}>{link.failReason}</span>}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{link.source || 'MANUAL'}</TableCell>
+                  <TableCell className="text-muted-foreground">{format(new Date(link.createdAt), "yyyy-MM-dd HH:mm")}</TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="icon" onClick={() => handleDelete(link.id)} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {links?.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">NO_LINKS_IN_QUEUE</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
