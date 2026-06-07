@@ -11,6 +11,7 @@ import Links from "@/pages/Links";
 import Jobs from "@/pages/Jobs";
 import Collections from "@/pages/Collections";
 import Settings from "@/pages/Settings";
+import Analytics from "@/pages/Analytics";
 
 const queryClient = new QueryClient();
 
