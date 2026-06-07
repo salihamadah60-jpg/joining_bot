@@ -7,6 +7,7 @@ import collectionsRouter from "./collections";
 import botRouter from "./bot";
 import authRouter from "./auth";
 import settingsRouter from "./settings";
+import eventsRouter from "./events";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(collectionsRouter);
 router.use(botRouter);
 router.use(authRouter);
 router.use(settingsRouter);
+router.use(eventsRouter);
 
 export default router;

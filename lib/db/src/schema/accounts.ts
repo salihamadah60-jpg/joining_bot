@@ -19,6 +19,11 @@ export const accountsTable = pgTable("accounts", {
   dailyResetAt: timestamp("daily_reset_at", { withTimezone: true }),
   channelsCount: integer("channels_count").notNull().default(0),
   isPremium: boolean("is_premium").notNull().default(false),
+  // P2-1: Device fingerprint — unique per account to avoid bot detection
+  deviceModel: text("device_model"),
+  systemVersion: text("system_version"),
+  appVersion: text("app_version"),
+  systemLangCode: text("system_lang_code"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

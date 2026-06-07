@@ -81,3 +81,70 @@ export function shouldResetDailyCounter(dailyResetAt: Date | null): boolean {
     now.getDate() !== dailyResetAt.getDate()
   );
 }
+
+// ─── P2-3: Configurable Sleep Schedule ──────────────────────────────────────────
+
+/**
+ * Jitter cache: per calendar day we pick a random ±1h offset so the start time
+ * varies slightly day to day, making activity less predictable.
+ */
+const jitterCache = new Map<string, number>(); // date string → offset hours (-1|0|1)
+
+function todayKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function getDailyJitter(): number {
+  const key = todayKey();
+  if (!jitterCache.has(key)) {
+    // Clear old entries
+    jitterCache.clear();
+    // Pick -1, 0, or +1 hour randomly
+    const offsets = [-1, 0, 0, 1]; // weighted: 50% no jitter
+    jitterCache.set(key, offsets[Math.floor(Math.random() * offsets.length)]);
+  }
+  return jitterCache.get(key)!;
+}
+
+/**
+ * P2-3: Is the current time within the BLACKOUT (inactive) window?
+ *
+ * @param activeStartHour - Hour of day (0–23) when bot becomes active (default 8 = 8am)
+ * @param activeHoursCount - How many hours the bot is active per day (default 18)
+ * @param applyJitter - Apply daily ±1h random jitter to start time
+ */
+export function isBlackoutHourConfigurable(
+  activeStartHour = BLACKOUT_END_HOUR,
+  activeHoursCount = ACTIVE_HOURS,
+  applyJitter = true
+): boolean {
+  const jitter = applyJitter ? getDailyJitter() : 0;
+  const start = ((activeStartHour + jitter) % 24 + 24) % 24;
+  const end = (start + activeHoursCount) % 24;
+  const hour = new Date().getHours();
+
+  if (end > start) {
+    // e.g. active 8→2: in blackout if hour < 8 or hour >= 26%24=2
+    return hour < start || hour >= end;
+  } else {
+    // Wraps midnight: e.g. active 22→16, blackout 16→22
+    return hour >= end && hour < start;
+  }
+}
+
+/**
+ * P2-3: Milliseconds until the active window starts (end of blackout).
+ */
+export function msUntilActiveStartConfigurable(
+  activeStartHour = BLACKOUT_END_HOUR,
+  applyJitter = true
+): number {
+  const jitter = applyJitter ? getDailyJitter() : 0;
+  const start = ((activeStartHour + jitter) % 24 + 24) % 24;
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(start, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  return next.getTime() - now.getTime();
+}

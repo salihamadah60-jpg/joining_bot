@@ -6,6 +6,9 @@
  * Uses SQLite storage files (one per account) for session persistence.
  * If the session file doesn't exist but a session string is available (from DB),
  * the session is imported so the account can reconnect without re-authentication.
+ *
+ * P2-1: Each client is initialized with a unique device profile (device_model,
+ * system_version, app_version) so every account looks like a different real device.
  */
 
 import { TelegramClient } from "@mtcute/node";
@@ -15,6 +18,7 @@ import { mkdirSync } from "fs";
 import { logger } from "./logger.js";
 import { db, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import type { DeviceProfile } from "./deviceProfiles.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SESSIONS_DIR = path.join(__dirname, "../../../../sessions");
@@ -79,10 +83,12 @@ async function getApiCredentials(): Promise<{ apiId: number; apiHash: string }> 
  * Get or create a connected TelegramClient for the given phone number.
  * @param phone - Phone number in international format (+XXXXXXXXX)
  * @param sessionString - Optional session string from DB for restore if file is missing
+ * @param deviceProfile - Optional device fingerprint for P2-1 device diversity
  */
 export async function getClient(
   phone: string,
-  sessionString?: string | null
+  sessionString?: string | null,
+  deviceProfile?: DeviceProfile | null
 ): Promise<TelegramClient> {
   const cached = pool.get(phone);
   if (cached) {
@@ -93,14 +99,20 @@ export async function getClient(
   const { apiId, apiHash } = await getApiCredentials();
   const storagePath = sessionFilePath(phone);
 
-  const client = new TelegramClient({
-    apiId,
-    apiHash,
-    storage: storagePath,
-  });
+  // P2-1: Build client options with device fingerprint
+  const clientOptions: Record<string, unknown> = { apiId, apiHash, storage: storagePath };
+  if (deviceProfile) {
+    clientOptions["deviceModel"] = deviceProfile.deviceModel;
+    clientOptions["systemVersion"] = deviceProfile.systemVersion;
+    clientOptions["appVersion"] = deviceProfile.appVersion;
+    clientOptions["systemLangCode"] = deviceProfile.systemLangCode;
+    clientOptions["langPack"] = deviceProfile.langPack;
+    logger.debug({ phone, device: deviceProfile.deviceModel }, "Using device profile");
+  }
+
+  const client = new TelegramClient(clientOptions as any);
 
   // If we have a session string backup from DB, import it
-  // This allows restoration if the SQLite file was lost (e.g., after redeploy)
   if (sessionString) {
     try {
       await client.importSession(sessionString);
@@ -112,7 +124,7 @@ export async function getClient(
   await client.connect();
 
   pool.set(phone, { client, lastUsed: new Date(), phone });
-  logger.info({ phone }, "TelegramClient connected and cached");
+  logger.info({ phone, device: deviceProfile?.deviceModel ?? "default" }, "TelegramClient connected and cached");
   return client;
 }
 

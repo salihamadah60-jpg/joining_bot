@@ -42,7 +42,16 @@ router.post("/accounts", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const [account] = await db.insert(accountsTable).values(parsed.data).returning();
+  // P2-1: Assign a unique device profile to each new account
+  const { getDeviceProfileForPhone } = await import("../lib/deviceProfiles.js");
+  const device = getDeviceProfileForPhone(parsed.data.phone);
+  const [account] = await db.insert(accountsTable).values({
+    ...parsed.data,
+    deviceModel: device.deviceModel,
+    systemVersion: device.systemVersion,
+    appVersion: device.appVersion,
+    systemLangCode: device.systemLangCode,
+  }).returning();
   res.status(201).json(GetAccountResponse.parse(serializeAccount(account)));
 });
 

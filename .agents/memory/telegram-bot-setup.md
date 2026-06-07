@@ -70,6 +70,26 @@ PORT=8080 pnpm --filter @workspace/api-server run dev & PORT=23183 BASE_PATH=/ p
 
 Full project plan (atomic, with status per feature): `/home/runner/workspace/PLAN.md`
 
+## P2/P3 Features Implemented
+
+**P2-1 Device Profiles:** `lib/deviceProfiles.ts` has 20 real devices. DB migration adds `device_model`, `system_version`, `app_version`, `system_lang_code` to `accounts`. `clientPool.getClient()` accepts optional third `DeviceProfile` arg passed as constructor options. Accounts route assigns device on creation.
+
+**P2-2 Post-join observation:** `observeGroupAfterJoin(client, chatId, url)` in `groupFilter.ts` — waits 3-10s random then tries `client.getHistory(chatId, {limit:8})` returning sample message strings. Returns empty array on failure (restricted group).
+
+**P2-3 Configurable sleep schedule:** `timing.ts` exports `isBlackoutHourConfigurable(startHour, activeHours, applyJitter)` and `msUntilActiveStartConfigurable(startHour)`. Engine reads `active_start_hour` from settings table each tick. Daily ±1h jitter cached per calendar day.
+
+**P2-4 Auth revoked notification:** On `auth_revoked` error, engine emits `account_needs_auth` SSE event, account set to `needs_auth`. User sees notification in dashboard to re-auth via Accounts page.
+
+**P2-5 SSE Notifications:** `eventBus.ts` = singleton EventEmitter. `routes/events.ts` = `GET /api/events` SSE endpoint with keepalive. `NotificationBell.tsx` = component in sidebar footer with unread badge and dropdown panel. Emits: engine_started/stopped, join_success, account_banned, account_needs_auth, channels_limit, flood_wait_long, links_exhausted.
+
+**P3-1 AI Filter:** `aiFilter.ts` uses `@google/generative-ai` + `GEMINI_API_KEY` env var. Model: `gemini-2.5-flash`. Returns `boolean | null` (null = fallback to keywords). Engine reads `ai_filter_enabled` from settings and calls `setAiFilterEnabled()` each tick. Toggle in Settings page. `isRelevantGroupAsync()` in groupFilter.ts tries AI first then falls back.
+
+## Env Vars Used
+
+Removed: `SESSION_SECRET` (not needed).
+Active: `DATABASE_URL`, `PG*`, `GEMINI_API_KEY` (P3-1 AI filter).
+Optional: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` (or set via Settings page).
+
 ## Auth Flow (Telegram OTP)
 
 In-memory `Map<phone, PendingSession>` holds TelegramClient mid-flow. Sessions auto-expire after 10 min. After verify, `client.exportSession()` string is saved to `accounts.session_string`. Temp SQLite file (`auth_{phone}.db`) deleted after auth completes.

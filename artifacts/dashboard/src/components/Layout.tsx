@@ -9,6 +9,7 @@ import {
   Settings
 } from "lucide-react";
 import { useHealthCheck } from "@workspace/api-client-react";
+import { NotificationBell } from "./NotificationBell";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -53,9 +54,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="p-4 border-t border-sidebar-border">
-          <div className="flex items-center gap-2 text-xs font-mono">
-            <div className={`w-2 h-2 rounded-full ${health?.status === 'ok' ? 'bg-primary shadow-[0_0_8px_var(--color-primary)]' : 'bg-destructive'}`} />
-            <span className="text-muted-foreground">API: {health?.status === 'ok' ? 'ONLINE' : 'OFFLINE'}</span>
+          <div className="flex items-center justify-between text-xs font-mono">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${health?.status === 'ok' ? 'bg-primary shadow-[0_0_8px_var(--color-primary)]' : 'bg-destructive'}`} />
+              <span className="text-muted-foreground">API: {health?.status === 'ok' ? 'ONLINE' : 'OFFLINE'}</span>
+            </div>
+            <NotificationBell />
           </div>
         </div>
       </div>
