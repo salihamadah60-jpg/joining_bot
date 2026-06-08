@@ -1,0 +1,84 @@
+
+> @workspace/api-server@0.0.0 dev /home/runner/workspace/artifacts/api-server
+> export NODE_ENV=development && pnpm run build && pnpm run start
+
+
+> @workspace/api-server@0.0.0 build /home/runner/workspace/artifacts/api-server
+> node ./build.mjs
+  dist/index.mjs                   3.8mb ⚠️
+  dist/pino-worker.mjs           153.4kb
+  dist/pino-file.mjs             142.1kb
+  dist/pino-pretty.mjs           114.6kb
+  dist/thread-stream-worker.mjs    7.3kb
+  ...and 5 more output files...
+
+⚡ Done in 734ms
+
+> @workspace/api-server@0.0.0 start /home/runner/workspace/artifacts/api-server
+> node --enable-source-maps ./dist/index.mjs
+
+[22:42:31.965] INFO (7642): Server listening
+    port: 8080
+[22:42:32.011] INFO (7642): Bot was running before restart — resuming engine
+[22:42:32.011] INFO (7642): MongoDB auto-sync started
+    intervalMinutes: 30
+[22:42:35.364] WARN (7642): Failed to import session string, will try connecting anyway
+    phone: "+967736187958"
+    err: {
+      "type": "Error",
+      "message": "/home/runner/workspace/node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/build/Release/better_sqlite3.node: undefined symbol: _ZN2v812api_internal33ConvertToJSGlobalProxyIfNecessaryEm",
+      "stack":
+          Error: /home/runner/workspace/node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/build/Release/better_sqlite3.node: undefined symbol: _ZN2v812api_internal33ConvertToJSGlobalProxyIfNecessaryEm
+              at Module._extensions..node (node:internal/modules/cjs/loader:1661:18)
+              at Module.load (node:internal/modules/cjs/loader:1266:32)
+              at Module._load (node:internal/modules/cjs/loader:1091:12)
+              at Module.require (node:internal/modules/cjs/loader:1289:19)
+              at require (node:internal/modules/helpers:182:18)
+              at bindings (/home/runner/workspace/node_modules/.pnpm/bindings@1.5.0/node_modules/bindings/bindings.js:112:48)
+              at new Database (/home/runner/workspace/node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/lib/database.js:48:64)
+              at Database (/home/runner/workspace/node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/lib/database.js:11:10)
+              at SqliteStorageDriver._createDatabase (file:///home/runner/workspace/node_modules/.pnpm/@mtcute+node@0.29.7/node_modules/@mtcute/node/sqlite/driver.js:10:16)
+              at SqliteStorageDriver._load (file:///home/runner/workspace/node_modules/.pnpm/@mtcute+core@0.29.7/node_modules/@mtcute/core/storage/sqlite/driver.js:74:20)
+      "code": "ERR_DLOPEN_FAILED"
+    }
+[22:42:35.365] ERROR (7642): Failed to get Telegram client
+    phone: "+967736187958"
+    err: {
+      "type": "Error",
+      "message": "/home/runner/workspace/node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/build/Release/better_sqlite3.node: undefined symbol: _ZN2v812api_internal33ConvertToJSGlobalProxyIfNecessaryEm",
+      "stack":
+          Error: /home/runner/workspace/node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/build/Release/better_sqlite3.node: undefined symbol: _ZN2v812api_internal33ConvertToJSGlobalProxyIfNecessaryEm
+              at Module._extensions..node (node:internal/modules/cjs/loader:1661:18)
+              at Module.load (node:internal/modules/cjs/loader:1266:32)
+              at Module._load (node:internal/modules/cjs/loader:1091:12)
+              at Module.require (node:internal/modules/cjs/loader:1289:19)
+              at require (node:internal/modules/helpers:182:18)
+              at bindings (/home/runner/workspace/node_modules/.pnpm/bindings@1.5.0/node_modules/bindings/bindings.js:112:48)
+              at new Database (/home/runner/workspace/node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/lib/database.js:48:64)
+              at Database (/home/runner/workspace/node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/lib/database.js:11:10)
+              at SqliteStorageDriver._createDatabase (file:///home/runner/workspace/node_modules/.pnpm/@mtcute+node@0.29.7/node_modules/@mtcute/node/sqlite/driver.js:10:16)
+              at SqliteStorageDriver._load (file:///home/runner/workspace/node_modules/.pnpm/@mtcute+core@0.29.7/node_modules/@mtcute/core/storage/sqlite/driver.js:74:20)
+      "code": "ERR_DLOPEN_FAILED"
+    }
+node:internal/process/promises:391
+    triggerUncaughtException(err, true /* fromPromise */);
+    ^
+
+Error: /home/runner/workspace/node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/build/Release/better_sqlite3.node: undefined symbol: _ZN2v812api_internal33ConvertToJSGlobalProxyIfNecessaryEm
+    at Module._extensions..node (node:internal/modules/cjs/loader:1661:18)
+    at Module.load (node:internal/modules/cjs/loader:1266:32)
+    at Module._load (node:internal/modules/cjs/loader:1091:12)
+    at Module.require (node:internal/modules/cjs/loader:1289:19)
+    at require (node:internal/modules/helpers:182:18)
+    at bindings (/home/runner/workspace/node_modules/.pnpm/bindings@1.5.0/node_modules/bindings/bindings.js:112:48)
+    at new Database (/home/runner/workspace/node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/lib/database.js:48:64)
+    at Database (/home/runner/workspace/node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/lib/database.js:11:10)
+    at SqliteStorageDriver._createDatabase (file:///home/runner/workspace/node_modules/.pnpm/@mtcute+node@0.29.7/node_modules/@mtcute/node/sqlite/driver.js:10:16)
+    at SqliteStorageDriver._load (file:///home/runner/workspace/node_modules/.pnpm/@mtcute+core@0.29.7/node_modules/@mtcute/core/storage/sqlite/driver.js:74:20) {
+  code: 'ERR_DLOPEN_FAILED'
+}
+
+Node.js v20.20.0
+ ELIFECYCLE  Command failed with exit code 1.
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @workspace/api-server@0.0.0 dev: `export NODE_ENV=development && pnpm run build && pnpm run start`
+Exit status 1
