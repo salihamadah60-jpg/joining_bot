@@ -24,6 +24,10 @@ async function buildAll() {
     logLevel: "info",
     external: [
       "*.node",
+      "*.wasm",
+      // @mtcute packages must NOT be bundled — they use require.resolve() for .wasm files at runtime
+      "@mtcute/*",
+      "mtcute",
       // Native / heavy packages that cannot be bundled
       "sharp",
       "better-sqlite3",    // @mtcute/node uses this for SQLite session storage

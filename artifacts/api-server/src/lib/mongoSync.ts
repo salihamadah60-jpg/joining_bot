@@ -65,15 +65,35 @@ export async function syncOne(
     try {
       const mongoDb = client.db(collection.dbName);
       const col = mongoDb.collection(collection.name);
+      // Fetch all fields so we can auto-detect the URL field if the configured one is wrong
       const docs = await col
-        .find({}, { projection: { [collection.linkField]: 1 } })
+        .find({})
+        .limit(10000)
         .toArray();
 
       for (const doc of docs) {
-        const rawUrl = doc[collection.linkField];
-        if (!rawUrl || typeof rawUrl !== "string") continue;
-        const url = rawUrl.trim();
+        // 1. Try the configured field name first
+        let rawUrl: string | null = null;
+        const configuredField = collection.linkField?.trim();
+        if (configuredField && typeof doc[configuredField] === "string") {
+          rawUrl = doc[configuredField];
+        }
+
+        // 2. If not found (or empty), scan ALL string fields for a t.me / telegram URL
+        if (!rawUrl || (!rawUrl.includes("t.me") && !rawUrl.startsWith("@") && !rawUrl.startsWith("http"))) {
+          for (const val of Object.values(doc)) {
+            if (typeof val === "string" && (val.includes("t.me/") || val.startsWith("@"))) {
+              rawUrl = val;
+              break;
+            }
+          }
+        }
+
+        if (!rawUrl) continue;
+        let url = rawUrl.trim().replace(/[,;.،؛\s]+$/, "");
         if (!url.startsWith("http") && !url.startsWith("t.me") && !url.startsWith("@")) continue;
+        if (url.startsWith("@")) url = `https://t.me/${url.slice(1)}`;
+        else if (url.startsWith("t.me")) url = `https://${url}`;
 
         try {
           await db.insert(groupLinksTable).values({ url, source: collection.name });

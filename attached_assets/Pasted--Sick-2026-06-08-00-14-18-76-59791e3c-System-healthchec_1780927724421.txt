@@ -1,0 +1,829 @@
+[٨‏/٦، ١:١٥ ص] Sick: 2026-06-08 00:14:18.76
+59791e3c
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:14:18.78
+59791e3c
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:14:18.85
+59791e3c
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:14:18.99
+59791e3c
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:14:19.19
+59791e3c
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:14:19.50
+59791e3c
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:14:26.93
+1509ec6e
+System
+artifact process exited with error error=signal: terminated artifact=artifacts/api-server
+
+2026-06-08 00:27:03.88
+3d18234e
+System
+healthcheck failed error=healthcheck /api: Get "http://127.0.0.1:1104/api": dial tcp 127.0.0.1:1104: connect: connection refused
+
+2026-06-08 00:27:03.89
+3d18234e
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:27:03.90
+3d18234e
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:27:03.93
+3d18234e
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:27:03.99
+3d18234e
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:27:04.11
+3d18234e
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:27:04.15
+3d18234e
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:27:04.51
+3d18234e
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:27:04.53
+3d18234e
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:27:05.77
+3d18234e
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 00:27:11.89
+59791e3c
+System
+artifact process exited with error error=signal: terminated artifact=artifacts/api-server
+
+2026-06-08 01:05:46.19
+46e404a3
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 01:05:46.20
+46e404a3
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 01:05:46.22
+46e404a3
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 01:05:46.25
+46e404a3
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 01:05:46.29
+46e404a3
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 01:05:46.44
+46e404a3
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 01:05:46.76
+46e404a3
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 01:05:46.90
+46e404a3
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 01:05:47.24
+46e404a3
+System
+healthcheck failed error=healthcheck /api returned status 500
+
+2026-06-08 01:05:47.55
+46e404a3
+User
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+2026-06-08 01:05:47.55
+46e404a3
+User
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+
+2026-06-08 01:05:47.55
+46e404a3
+User
+To prepare for this change:
+
+2026-06-08 01:07:22.26
+3d18234e
+System
+artifact process exited with error error=signal: terminated artifact=artifacts/api-server
+[٨‏/٦، ١:١٨ ص] Sick: level":30,"time":1780870659434,"pid":18,"hostname":"localhost","req":{"id":37,"method":"GET","url":"/api/events"},"res":{"statusCode":200},"responseTime":299995,"msg":"request aborted"}
+
+2026-06-08 01:17:40.17
+46e404a3
+User
+{"level":30,"time":1780870660177,"pid":18,"hostname":"localhost","req":{"id":71,"method":"PUT","url":"/api/settings"},"res":{"statusCode":400},"responseTime":1,"msg":"request completed"}
+
+2026-06-08 01:17:59.05
+46e404a3
+User
+{"level":30,"time":1780870679050,"pid":18,"hostname":"localhost","req":{"id":73,"method":"PUT","url":"/api/settings"},"res":{"statusCode":400},"responseTime":1,"msg":"request completed"}
+
+2026-06-08 01:17:59.05
+46e404a3
+User
+{"level":30,"time":1780870679050,"pid":18,"hostname":"localhost","req":{"id":73,"method":"PUT","url":"/api/settings"},"res":{"statusCode":400},"responseTime":1,"msg":"request completed"}
+
+2026-06-08 01:17:59.05
+46e404a3
+User
+{"level":30,"time":1780870679050,"pid":18,"hostname":"localhost","req":{"id":73,"method":"PUT","url":"/api/settings"},"res":{"statusCode":400},"responseTime":1,"msg":"request completed"}
+
+2026-06-08 01:17:59.05
+46e404a3
+User
+{"level":30,"time":1780870679050,"pid":18,"hostname":"localhost","req":{"id":73,"method":"PUT","url":"/api/settings"},"res":{"statusCode":400},"responseTime":1,"msg":"request completed"}
+
+2026-06-08 01:17:59.05
+46e404a3
+User
+{"level":30,"time":1780870679050,"pid":18,"hostname":"localhost","req":{"id":73,"method":"PUT","url":"/api/settings"},"res":{"statusCode":400},"responseTime":1,"msg":"request completed"}
+
+2026-06-08 01:17:59.05
+46e404a3
+User
+{"level":30,"time":1780870679050,"pid":18,"hostname":"localhost","req":{"id":73,"method":"PUT","url":"/api/settings"},"res":{"statusCode":400},"responseTime":1,"msg":"request completed"}
+
+2026-06-08 01:17:59.05
+46e404a3
+User
+{"level":30,"time":1780870679050,"pid":18,"hostname":"localhost","req":{"id":73,"method":"PUT","url":"/api/settings"},"res":{"statusCode":400},"responseTime":1,"msg":"request completed"}
+[٨‏/٦، ١:٢١ ص] Sick: Failed to load resource: the server responded with a status of 400 ()Understand this error
+api/events:1  Failed to load resource: net::ERR_QUIC_PROTOCOL_ERROR.QUIC_TOO_MANY_RTOSUnderstand this error
+index-CpM2dfZw.js:9  PUT https://joiningbot--joining-bot.replit.app/api/settings 400 (Bad Request)
+yt @ index-CpM2dfZw.js:9
+lG @ index-CpM2dfZw.js:9
+mutationFn @ index-CpM2dfZw.js:9
+fn @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+execute @ index-CpM2dfZw.js:9
+await in execute
+mutate @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+H @ index-CpM2dfZw.js:79
+LT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8
+KO @ index-CpM2dfZw.js:8
+ay @ index-CpM2dfZw.js:8
+yy @ index-CpM2dfZw.js:9
+J5 @ index-CpM2dfZw.js:9Understand this error
+index-CpM2dfZw.js:9  POST https://joiningbot--joining-bot.replit.app/api/auth/send-code 400 (Bad Request)
+yt @ index-CpM2dfZw.js:9
+tF @ index-CpM2dfZw.js:9
+mutationFn @ index-CpM2dfZw.js:9
+fn @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+execute @ index-CpM2dfZw.js:9
+await in execute
+mutate @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+A @ index-CpM2dfZw.js:77
+LT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8
+KO @ index-CpM2dfZw.js:8
+ay @ index-CpM2dfZw.js:8
+yy @ index-CpM2dfZw.js:9
+J5 @ index-CpM2dfZw.js:9Understand this error
+api/events:1  GET https://joiningbot--joining-bot.replit.app/api/events net::ERR_QUIC_PROTOCOL_ERROR.QUIC_TOO_MANY_RTOS 200 (OK)Understand this error
+index-CpM2dfZw.js:9  POST https://joiningbot--joining-bot.replit.app/api/auth/send-code 400 (Bad Request)
+yt @ index-CpM2dfZw.js:9
+tF @ index-CpM2dfZw.js:9
+mutationFn @ index-CpM2dfZw.js:9
+fn @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+execute @ index-CpM2dfZw.js:9
+await in execute
+mutate @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+A @ index-CpM2dfZw.js:77
+LT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8
+KO @ index-CpM2dfZw.js:8
+ay @ index-CpM2dfZw.js:8
+yy @ index-CpM2dfZw.js:9
+J5 @ index-CpM2dfZw.js:9Understand this error
+index-CpM2dfZw.js:58 Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+(anonymous) @ index-CpM2dfZw.js:58
+eu @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+CT @ index-CpM2dfZw.js:8
+Kf @ index-CpM2dfZw.js:8
+ET @ index-CpM2dfZw.js:8
+AT @ index-CpM2dfZw.js:8
+yT @ index-CpM2dfZw.js:8
+vT @ index-CpM2dfZw.js:8
+kT @ index-CpM2dfZw.js:8
+su @ index-CpM2dfZw.js:8
+MT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8Understand this warning
+index-CpM2dfZw.js:9  POST https://joiningbot--joining-bot.replit.app/api/links/bulk 500 (Internal Server Error)
+[٨‏/٦، ١:٢٥ ص] Sick: انا:
+https://t.me/+h95LSAIsybEwZTY8
+
+https://t.me/+dC8PdoyoNV5kMjU8
+
+https://t.me/pediadmm 
+قروب بيديا الدمام
+
+https://t.me/serviac
+
+قروب للكلنكال فارمسي
+
+https://t.me/+7sLOX3hR2ow4MzY0
+
+https://t.me/+mdv50VmF8LA0YjM0
+
+هذا قروب سويته للي مهتمين بالطب النفسي الطائف عام ٢٠٢٦ 
+
+https://t.me/+q9GlyPOV4QthNzNk
+
+https://t.me/+n8JkxmeUyhIzYTI0
+
+قروب يخص المتقدمين على تخصص الاطفال ف الرياض 2026
+
+https://t.me/+4eCJjKGJfKRkMDk8
+
+🔴🔴🔴GS group eastern 2026
+
+https://t.me/+WWl2tL8NfMU3ODZk
+
+🔴🔴🔴 GS alhasa 2026
+
+https://t.me/+7sLOX3hR2ow4MzY0
+
+https://t.me/+dnz4RHsJks9lYWVk
+
+https://t.me/Qosco
+
+https://t.me/e_rtiqa
+
+https://t.me/OBYGN2026Match
+
+https://t.me/dentalmatching2020
+
+السلام عليكم
+للي مقدمين اي ار بالرياض ماتشينق نتساعد🙏 
+https://t.me/+Sqw2XY5EYndkOTRk
+
+https://t.me/Residency_Interview
+[٨‏/٦، ١:٤٩ ص] Sick: Failed to load resource: the server responded with a status of 400 ()Understand this error
+api/events:1  Failed to load resource: net::ERR_QUIC_PROTOCOL_ERROR.QUIC_TOO_MANY_RTOSUnderstand this error
+index-CpM2dfZw.js:9  PUT https://joiningbot--joining-bot.replit.app/api/settings 400 (Bad Request)
+yt @ index-CpM2dfZw.js:9
+lG @ index-CpM2dfZw.js:9
+mutationFn @ index-CpM2dfZw.js:9
+fn @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+execute @ index-CpM2dfZw.js:9
+await in execute
+mutate @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+H @ index-CpM2dfZw.js:79
+LT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8
+KO @ index-CpM2dfZw.js:8
+ay @ index-CpM2dfZw.js:8
+yy @ index-CpM2dfZw.js:9
+J5 @ index-CpM2dfZw.js:9Understand this error
+index-CpM2dfZw.js:9  POST https://joiningbot--joining-bot.replit.app/api/auth/send-code 400 (Bad Request)
+yt @ index-CpM2dfZw.js:9
+tF @ index-CpM2dfZw.js:9
+mutationFn @ index-CpM2dfZw.js:9
+fn @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+execute @ index-CpM2dfZw.js:9
+await in execute
+mutate @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+A @ index-CpM2dfZw.js:77
+LT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8
+KO @ index-CpM2dfZw.js:8
+ay @ index-CpM2dfZw.js:8
+yy @ index-CpM2dfZw.js:9
+J5 @ index-CpM2dfZw.js:9Understand this error
+api/events:1  GET https://joiningbot--joining-bot.replit.app/api/events net::ERR_QUIC_PROTOCOL_ERROR.QUIC_TOO_MANY_RTOS 200 (OK)Understand this error
+index-CpM2dfZw.js:9  POST https://joiningbot--joining-bot.replit.app/api/auth/send-code 400 (Bad Request)
+yt @ index-CpM2dfZw.js:9
+tF @ index-CpM2dfZw.js:9
+mutationFn @ index-CpM2dfZw.js:9
+fn @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+execute @ index-CpM2dfZw.js:9
+await in execute
+mutate @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+A @ index-CpM2dfZw.js:77
+LT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8
+KO @ index-CpM2dfZw.js:8
+ay @ index-CpM2dfZw.js:8
+yy @ index-CpM2dfZw.js:9
+J5 @ index-CpM2dfZw.js:9Understand this error
+index-CpM2dfZw.js:58 Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+(anonymous) @ index-CpM2dfZw.js:58
+eu @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+CT @ index-CpM2dfZw.js:8
+Kf @ index-CpM2dfZw.js:8
+ET @ index-CpM2dfZw.js:8
+AT @ index-CpM2dfZw.js:8
+yT @ index-CpM2dfZw.js:8
+vT @ index-CpM2dfZw.js:8
+kT @ index-CpM2dfZw.js:8
+su @ index-CpM2dfZw.js:8
+MT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8Understand this warning
+index-CpM2dfZw.js:9  POST https://joiningbot--joining-bot.replit.app/api/links/bulk 500 (Internal Server Error)
+yt @ index-CpM2dfZw.js:9
+SF @ index-CpM2dfZw.js:9
+mutationFn @ index-CpM2dfZw.js:9
+fn @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+execute @ index-CpM2dfZw.js:9
+await in execute
+mutate @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+m @ index-CpM2dfZw.js:78
+LT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8
+KO @ index-CpM2dfZw.js:8
+ay @ index-CpM2dfZw.js:8
+yy @ index-CpM2dfZw.js:9
+J5 @ index-CpM2dfZw.js:9Understand this error
+index-CpM2dfZw.js:58 Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+(anonymous) @ index-CpM2dfZw.js:58
+eu @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+kr @ index-CpM2dfZw.js:8
+uT @ index-CpM2dfZw.js:8
+CT @ index-CpM2dfZw.js:8
+Kf @ index-CpM2dfZw.js:8
+ET @ index-CpM2dfZw.js:8
+AT @ index-CpM2dfZw.js:8
+yT @ index-CpM2dfZw.js:8
+vT @ index-CpM2dfZw.js:8
+kT @ index-CpM2dfZw.js:8
+su @ index-CpM2dfZw.js:8
+MT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8Understand this warning
+index-CpM2dfZw.js:9  POST https://joiningbot--joining-bot.replit.app/api/auth/send-code 400 (Bad Request)
+yt @ index-CpM2dfZw.js:9
+tF @ index-CpM2dfZw.js:9
+mutationFn @ index-CpM2dfZw.js:9
+fn @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+execute @ index-CpM2dfZw.js:9
+await in execute
+mutate @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+A @ index-CpM2dfZw.js:77
+LT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8
+KO @ index-CpM2dfZw.js:8
+ay @ index-CpM2dfZw.js:8
+yy @ index-CpM2dfZw.js:9
+J5 @ index-CpM2dfZw.js:9Understand this error
+events:1  GET https://joiningbot--joining-bot.replit.app/api/events net::ERR_QUIC_PROTOCOL_ERROR.QUIC_TOO_MANY_RTOS 200 (OK)Understand this error
+events:1  GET https://joiningbot--joining-bot.replit.app/api/events net::ERR_QUIC_PROTOCOL_ERROR.QUIC_TOO_MANY_RTOS 200 (OK)Understand this error
+events:1  GET https://joiningbot--joining-bot.replit.app/api/events net::ERR_CONNECTION_TIMED_OUTUnderstand this error
+events:1  GET https://joiningbot--joining-bot.replit.app/api/events net::ERR_NETWORK_CHANGEDUnderstand this error
+events:1  GET https://joiningbot--joining-bot.replit.app/api/events net::ERR_NETWORK_CHANGEDUnderstand this error
+index-CpM2dfZw.js:9  GET https://joiningbot--joining-bot.replit.app/api/healthz net::ERR_QUIC_PROTOCOL_ERROR.QUIC_NETWORK_IDLE_TIMEOUT
+yt @ index-CpM2dfZw.js:9
+j9 @ index-CpM2dfZw.js:9
+queryFn @ index-CpM2dfZw.js:9
+i @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+fetch @ index-CpM2dfZw.js:9
+#h @ index-CpM2dfZw.js:9
+fetch @ index-CpM2dfZw.js:9
+refetch @ index-CpM2dfZw.js:9
+onOnline @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+batch @ index-CpM2dfZw.js:9
+onOnline @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+await in (anonymous)
+(anonymous) @ index-CpM2dfZw.js:9
+setOnline @ index-CpM2dfZw.js:9
+t @ index-CpM2dfZw.js:9Understand this error
+index-CpM2dfZw.js:9  GET https://joiningbot--joining-bot.replit.app/api/bot/activity net::ERR_QUIC_PROTOCOL_ERROR.QUIC_NETWORK_IDLE_TIMEOUT
+yt @ index-CpM2dfZw.js:9
+NG @ index-CpM2dfZw.js:9
+queryFn @ index-CpM2dfZw.js:9
+i @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+fetch @ index-CpM2dfZw.js:9
+#h @ index-CpM2dfZw.js:9
+fetch @ index-CpM2dfZw.js:9
+refetch @ index-CpM2dfZw.js:9
+onOnline @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+batch @ index-CpM2dfZw.js:9
+onOnline @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+await in (anonymous)
+(anonymous) @ index-CpM2dfZw.js:9
+setOnline @ index-CpM2dfZw.js:9
+t @ index-CpM2dfZw.js:9Understand this error
+index-CpM2dfZw.js:9  GET https://joiningbot--joining-bot.replit.app/api/accounts/stats net::ERR_QUIC_PROTOCOL_ERROR.QUIC_NETWORK_IDLE_TIMEOUT
+yt @ index-CpM2dfZw.js:9
+X9 @ index-CpM2dfZw.js:9
+queryFn @ index-CpM2dfZw.js:9
+i @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+fetch @ index-CpM2dfZw.js:9
+#h @ index-CpM2dfZw.js:9
+fetch @ index-CpM2dfZw.js:9
+refetch @ index-CpM2dfZw.js:9
+onOnline @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+batch @ index-CpM2dfZw.js:9
+onOnline @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+await in (anonymous)
+(anonymous) @ index-CpM2dfZw.js:9
+setOnline @ index-CpM2dfZw.js:9
+t @ index-CpM2dfZw.js:9Understand this error
+index-CpM2dfZw.js:9  GET https://joiningbot--joining-bot.replit.app/api/bot/status net::ERR_QUIC_PROTOCOL_ERROR.QUIC_NETWORK_IDLE_TIMEOUT
+yt @ index-CpM2dfZw.js:9
+yG @ index-CpM2dfZw.js:9
+queryFn @ index-CpM2dfZw.js:9
+i @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+fetch @ index-CpM2dfZw.js:9
+#h @ index-CpM2dfZw.js:9
+fetch @ index-CpM2dfZw.js:9
+refetch @ index-CpM2dfZw.js:9
+onOnline @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+batch @ index-CpM2dfZw.js:9
+onOnline @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+await in (anonymous)
+(anonymous) @ index-CpM2dfZw.js:9
+setOnline @ index-CpM2dfZw.js:9
+t @ index-CpM2dfZw.js:9Understand this error
+index-CpM2dfZw.js:9  GET https://joiningbot--joining-bot.replit.app/api/links/stats net::ERR_QUIC_PROTOCOL_ERROR.QUIC_NETWORK_IDLE_TIMEOUT
+yt @ index-CpM2dfZw.js:9
+NF @ index-CpM2dfZw.js:9
+queryFn @ index-CpM2dfZw.js:9
+i @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+fetch @ index-CpM2dfZw.js:9
+#h @ index-CpM2dfZw.js:9
+fetch @ index-CpM2dfZw.js:9
+refetch @ index-CpM2dfZw.js:9
+onOnline @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+batch @ index-CpM2dfZw.js:9
+onOnline @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+await in (anonymous)
+(anonymous) @ index-CpM2dfZw.js:9
+setOnline @ index-CpM2dfZw.js:9
+t @ index-CpM2dfZw.js:9Understand this error
+events:1  GET https://joiningbot--joining-bot.replit.app/api/events net::ERR_QUIC_PROTOCOL_ERROR.QUIC_NETWORK_IDLE_TIMEOUTUnderstand this error
+events:1  GET https://joiningbot--joining-bot.replit.app/api/events net::ERR_CONNECTION_TIMED_OUT
+[٨‏/٦، ١:٥٣ ص] Sick: GET https://joiningbot--joining-bot.replit.app/api/events net::ERR_CONNECTION_RESET 200 (OK)Understand this error
+index-CpM2dfZw.js:9  PUT https://joiningbot--joining-bot.replit.app/api/settings 400 (Bad Request)
+yt @ index-CpM2dfZw.js:9
+lG @ index-CpM2dfZw.js:9
+mutationFn @ index-CpM2dfZw.js:9
+fn @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+execute @ index-CpM2dfZw.js:9
+await in execute
+mutate @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+k @ index-CpM2dfZw.js:79
+(anonymous) @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:14
+(anonymous) @ index-CpM2dfZw.js:9
+LT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8
+KO @ index-CpM2dfZw.js:8
+ay @ index-CpM2dfZw.js:8
+yy @ index-CpM2dfZw.js:9
+J5 @ index-CpM2dfZw.js:9Understand this error
+/api/events:1  GET https://joiningbot--joining-bot.replit.app/api/events net::ERR_CONNECTION_RESET 200 (OK)Understand this error
+index-CpM2dfZw.js:9  POST https://joiningbot--joining-bot.replit.app/api/auth/send-code 400 (Bad Request)
+yt @ index-CpM2dfZw.js:9
+tF @ index-CpM2dfZw.js:9
+mutationFn @ index-CpM2dfZw.js:9
+fn @ index-CpM2dfZw.js:9
+O @ index-CpM2dfZw.js:9
+start @ index-CpM2dfZw.js:9
+execute @ index-CpM2dfZw.js:9
+await in execute
+mutate @ index-CpM2dfZw.js:9
+(anonymous) @ index-CpM2dfZw.js:9
+A @ index-CpM2dfZw.js:77
+LT @ index-CpM2dfZw.js:8
+(anonymous) @ index-CpM2dfZw.js:8
+KO @ index-CpM2dfZw.js:8
+ay @ index-CpM2dfZw.js:8
+yy @ index-CpM2dfZw.js:9
+J5 @ index-CpM2dfZw.js:9Understand this error
+events:1  GET https://joiningbot--joining-bot.replit.app/api/events 503 (Service Unavailable)

@@ -55,21 +55,60 @@ router.post("/links", async (req, res): Promise<void> => {
   }
 });
 
+/** Extract all valid Telegram URLs from a raw text blob (mixed text + links). */
+function extractTelegramUrls(rawText: string): string[] {
+  // Match: https://t.me/..., t.me/..., @username
+  const pattern = /(?:https?:\/\/t\.me\/[^\s"'<>\u0600-\u06FF]+|t\.me\/[^\s"'<>\u0600-\u06FF]+|@[a-zA-Z][a-zA-Z0-9_]{3,})/gi;
+  const matches = rawText.match(pattern) ?? [];
+  // Normalise: ensure https:// prefix, strip trailing punctuation
+  const normalised = matches.map((u) => {
+    let url = u.trim().replace(/[,;.،؛]+$/, "");
+    if (url.startsWith("@")) return `https://t.me/${url.slice(1)}`;
+    if (!url.startsWith("http")) return `https://${url}`;
+    return url;
+  });
+  // Deduplicate (case-insensitive)
+  const seen = new Set<string>();
+  return normalised.filter((u) => {
+    const key = u.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 router.post("/links/bulk", async (req, res): Promise<void> => {
-  const parsed = BulkAddLinksBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-  const { urls, source } = parsed.data;
+  // Accept either { urls: string[] } or { rawText: string } or plain text body
+  let rawUrls: string[] = [];
+  const body = req.body as any;
+
+  if (body?.rawText && typeof body.rawText === "string") {
+    // Extract URLs from mixed text
+    rawUrls = extractTelegramUrls(body.rawText);
+  } else {
+    const parsed = BulkAddLinksBody.safeParse(body);
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+    // Each entry in urls may itself be a mixed-text line — re-extract to be safe
+    const allText = parsed.data.urls.join("\n");
+    rawUrls = extractTelegramUrls(allText);
+    // If no telegram URLs found, use the original list as-is (non-telegram links)
+    if (rawUrls.length === 0) rawUrls = parsed.data.urls;
+  }
+
+  const source = body?.source ?? null;
   let added = 0;
   let duplicates = 0;
-  for (const url of urls) {
+  let errors = 0;
+
+  for (const url of rawUrls) {
     try {
-      await db.insert(groupLinksTable).values({ url, source: source ?? null });
+      await db.insert(groupLinksTable).values({ url, source });
       added++;
     } catch (e: any) {
-      if (e.code === "23505") { duplicates++; } else { throw e; }
+      if (e.code === "23505") { duplicates++; } else { errors++; }
     }
   }
-  res.status(201).json({ added, duplicates, total: urls.length });
+  res.status(201).json({ added, duplicates, errors, total: rawUrls.length, extracted: rawUrls.length });
 });
 
 router.delete("/links/:id", async (req, res): Promise<void> => {

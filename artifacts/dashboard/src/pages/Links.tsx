@@ -29,15 +29,22 @@ export default function Links() {
   const [bulkUrls, setBulkUrls] = useState("");
 
   const handleBulkAdd = () => {
-    const urls = bulkUrls.split('\n').map(u => u.trim()).filter(u => u.length > 0);
-    if (urls.length === 0) return;
+    if (!bulkUrls.trim()) return;
 
-    bulkAddLinks.mutate({ data: { urls } }, {
-      onSuccess: (data) => {
+    // Send raw text — server will extract & deduplicate all t.me URLs automatically
+    bulkAddLinks.mutate({ data: { urls: [bulkUrls] } }, {
+      onSuccess: (data: any) => {
         queryClient.invalidateQueries({ queryKey: ["/api/links"] });
         setIsBulkOpen(false);
         setBulkUrls("");
-        toast({ title: "Links Added", description: `Added ${data.added} links. ${data.duplicates} duplicates skipped.` });
+        const extracted = data.extracted ?? data.total ?? 0;
+        toast({
+          title: `✅ تم إضافة ${data.added} رابط`,
+          description: `${extracted} رابط استُخرج — ${data.duplicates} مكرر تجاهَل — ${data.errors ?? 0} خطأ`,
+        });
+      },
+      onError: () => {
+        toast({ title: "خطأ", description: "فشل إضافة الروابط", variant: "destructive" });
       }
     });
   };

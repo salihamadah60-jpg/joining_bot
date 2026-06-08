@@ -3,6 +3,21 @@ name: Telegram Bot Manager Setup
 description: Critical decisions, gotchas, and architectural constraints for this Telegram multi-account bot manager project.
 ---
 
+## Critical: @mtcute WASM in Production Build
+
+`@mtcute/node` uses `require.resolve('@mtcute/wasm/mtcute-simd.wasm')` at runtime. When esbuild bundles everything into one `dist/index.mjs`, this path breaks and crashes the server (auth fails with "Cannot find module").
+
+**Fix in `build.mjs` externals list:**
+```
+"@mtcute/*",
+"mtcute",
+"*.wasm",
+```
+
+This keeps @mtcute packages unresolved in the bundle so they load from `node_modules` at runtime where WASM files are accessible. Bundle shrinks from ~5.7mb to ~3.8mb as a side effect.
+
+**Why:** esbuild inlines node_modules into the bundle, breaking relative path resolution inside @mtcute for `.wasm` file loading.
+
 ## Stack Decision: @mtcute/node
 
 - Using `@mtcute/node` for Telegram MTProto (not GramJS — blocked by firewall on `es5-ext`)
@@ -61,6 +76,10 @@ The "Start application" workflow command must include both PORT and BASE_PATH:
 ```
 PORT=8080 pnpm --filter @workspace/api-server run dev & PORT=23183 BASE_PATH=/ pnpm --filter @workspace/dashboard run dev & wait
 ```
+
+## Settings ALLOWED_KEYS
+
+`settings.ts` PUT endpoint has an explicit `ALLOWED_KEYS` set. Any new setting key added to the app (e.g. from new features) MUST also be added to this set or the route returns 400. Current set: `telegram_api_id`, `telegram_api_hash`, `auto_sync_interval_minutes`, `active_start_hour`, `ai_filter_enabled`, `mongo_backup_url`, `mongo_backup_db`.
 
 ## MongoDB Auto-Sync
 
