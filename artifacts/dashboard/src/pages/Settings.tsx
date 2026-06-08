@@ -104,7 +104,9 @@ export default function Settings() {
   const [mongoBackupDb, setMongoBackupDb] = useState("tg_backup");
   const [backupLoading, setBackupLoading] = useState(false);
   const [restoreLoading, setRestoreLoading] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
   const [backupResult, setBackupResult] = useState<any>(null);
+  const [importResult, setImportResult] = useState<any>(null);
 
   // P3-3: Save MongoDB backup URL
   const handleSaveMongoBackup = () => {
@@ -145,7 +147,7 @@ export default function Settings() {
     }
   };
 
-  // P3-3: Restore sessions from MongoDB
+  // P3-3: Restore sessions from MongoDB (existing accounts only)
   const handleRestoreNow = async () => {
     setRestoreLoading(true);
     try {
@@ -161,6 +163,30 @@ export default function Settings() {
       toast({ title: "خطأ في الاتصال", variant: "destructive" });
     } finally {
       setRestoreLoading(false);
+    }
+  };
+
+  // Import ALL accounts from MongoDB → PostgreSQL (creates new accounts too)
+  const handleImportNow = async () => {
+    setImportLoading(true);
+    setImportResult(null);
+    try {
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+      const r = await fetch(`${base}/api/sessions/import`, { method: "POST" });
+      const data = await r.json();
+      setImportResult(data);
+      if (data.ok) {
+        toast({
+          title: "✅ استيراد مكتمل",
+          description: `جديد: ${data.imported} | محدّث: ${data.updated} | الإجمالي: ${data.total}`,
+        });
+      } else {
+        toast({ title: "خطأ في الاستيراد", description: data.error ?? "فشل الاستيراد", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "خطأ في الاتصال", description: "تأكد من أن الخادم يعمل", variant: "destructive" });
+    } finally {
+      setImportLoading(false);
     }
   };
 
@@ -453,6 +479,69 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground">
                 سيتم إنشاء مجموعة <code className="bg-muted px-1 rounded font-mono">tg_sessions</code> تلقائياً داخل هذه القاعدة.
               </p>
+            </div>
+          </div>
+
+          <div className="bg-primary/10 border border-primary/30 rounded-md p-3 text-sm text-primary font-medium">
+            💡 إذا كانت حساباتك محفوظة في MongoDB — اضغط <strong>استيراد الحسابات</strong> مباشرة (لا تحتاج تعبئة الحقول أدناه).
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <Button
+              onClick={handleImportNow}
+              disabled={importLoading}
+              className="flex items-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              {importLoading
+                ? <RefreshCw className="w-4 h-4 animate-spin" />
+                : <Download className="w-4 h-4" />}
+              استيراد الحسابات من MongoDB
+            </Button>
+          </div>
+
+          {importResult && (
+            <div className={`rounded-md p-3 text-xs font-mono space-y-1 border ${importResult.ok ? "bg-primary/5 border-primary/20 text-primary" : "bg-destructive/5 border-destructive/20 text-destructive"}`}>
+              {importResult.ok ? (
+                <>
+                  <p>✅ استيراد مكتمل من MongoDB → PostgreSQL</p>
+                  <p>
+                    جديد: <span className="font-bold">{importResult.imported}</span> &nbsp;|&nbsp;
+                    محدّث: <span className="font-bold">{importResult.updated}</span> &nbsp;|&nbsp;
+                    تجاوز: <span className="font-bold">{importResult.skipped}</span> &nbsp;|&nbsp;
+                    أخطاء: <span className="font-bold">{importResult.errors}</span> &nbsp;|&nbsp;
+                    الإجمالي: <span className="font-bold">{importResult.total}</span>
+                  </p>
+                </>
+              ) : (
+                <p>❌ {importResult.error}</p>
+              )}
+            </div>
+          )}
+
+          <hr className="border-border" />
+          <p className="text-xs text-muted-foreground font-semibold">نسخ احتياطي يدوي (اختياري — لإعداد قاعدة بيانات مختلفة)</p>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-foreground">رابط MongoDB (Connection String)</Label>
+              <Input
+                type="password"
+                placeholder="mongodb+srv://user:password@cluster.mongodb.net"
+                value={mongoBackupUrl}
+                onChange={(e) => setMongoBackupUrl(e.target.value)}
+                className="font-mono bg-background border-border text-foreground text-xs"
+                dir="ltr"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-foreground">اسم قاعدة البيانات</Label>
+              <Input
+                placeholder="Joining_links"
+                value={mongoBackupDb}
+                onChange={(e) => setMongoBackupDb(e.target.value)}
+                className="w-48 font-mono bg-background border-border text-foreground"
+                dir="ltr"
+              />
             </div>
           </div>
 
