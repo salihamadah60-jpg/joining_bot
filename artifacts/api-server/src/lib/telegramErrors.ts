@@ -13,7 +13,7 @@ export type TelegramErrorAction =
   | "already_joined"    // Link already joined (count as success)
   | "auth_revoked"      // Session expired, account needs re-auth
   | "account_banned"    // Account banned by Telegram
-  | "unknown";          // Unexpected error, treat as link failure
+  | "unknown";          // Unexpected error, may retry
 
 export interface TelegramErrorInfo {
   action: TelegramErrorAction;
@@ -23,18 +23,33 @@ export interface TelegramErrorInfo {
 
 /**
  * Extract the error code string from any thrown error.
- * @mtcute errors have an `errorMessage` property or the message matches the code.
+ * @mtcute errors have an `errorMessage` property (e.g. "FLOOD_WAIT_120").
+ * Fallback: scan the message string for ALL_CAPS_CODES (min 3 chars).
  */
 export function extractErrorCode(err: unknown): string {
   if (err && typeof err === "object") {
     const e = err as Record<string, unknown>;
-    if (typeof e["errorMessage"] === "string") return e["errorMessage"] as string;
+
+    // @mtcute RpcError: errorMessage is the canonical Telegram error string
+    if (typeof e["errorMessage"] === "string" && e["errorMessage"].length >= 2) {
+      return (e["errorMessage"] as string).trim();
+    }
+
+    // Some @mtcute builds expose 'text' or 'rpcMessage'
+    for (const key of ["text", "rpcMessage"]) {
+      if (typeof e[key] === "string" && /^[A-Z][A-Z_]{2,}/.test(e[key] as string)) {
+        return (e[key] as string).trim();
+      }
+    }
+
     if (typeof e["message"] === "string") {
       const msg = e["message"] as string;
-      // Typical format: "FLOOD_WAIT_120" or "Telegram error: FLOOD_WAIT_120"
-      const match = msg.match(/([A-Z_]+(?:_\d+)?)/);
-      if (match) return match[1];
-      return msg.substring(0, 80);
+      // Require ≥3 uppercase chars to avoid extracting single-letter initials
+      // from CamelCase messages (e.g. "PeerIdInvalid" → "P" was the old bug)
+      const match = msg.match(/\b([A-Z][A-Z_]{2,}(?:_\d+)?)\b/);
+      if (match) return match[1]!;
+      // Return the full message (truncated) so logs are useful
+      return msg.substring(0, 100).replace(/\n/g, " ");
     }
   }
   return "UNKNOWN";
@@ -48,7 +63,7 @@ export function classifyTelegramError(err: unknown): TelegramErrorInfo {
 
   // FLOOD_WAIT_N — must wait N seconds
   if (/^FLOOD_WAIT_(\d+)$/.test(code)) {
-    const waitSeconds = parseInt(code.split("_")[2], 10);
+    const waitSeconds = parseInt(code.split("_")[2]!, 10);
     return { action: "flood_wait", code, waitSeconds };
   }
 
@@ -98,7 +113,7 @@ export function classifyTelegramError(err: unknown): TelegramErrorInfo {
       "USER_BANNED_IN_CHANNEL",
       "CHAT_ADMIN_REQUIRED",
       "PEER_ID_INVALID",
-      "INVITE_REQUEST_SENT", // Already sent a request (treat as link handled)
+      "INVITE_REQUEST_SENT",
       "JOIN_AS_PEER_INVALID",
       "CHANNEL_ID_INVALID",
       "MSG_ID_INVALID",

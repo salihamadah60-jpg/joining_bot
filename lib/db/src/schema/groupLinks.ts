@@ -11,6 +11,7 @@ export const groupLinksTable = pgTable("group_links", {
   groupType: text("group_type"),
   source: text("source"),
   usedByAccountId: integer("used_by_account_id"),
+  retryCount: integer("retry_count").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   processedAt: timestamp("processed_at", { withTimezone: true }),
 });

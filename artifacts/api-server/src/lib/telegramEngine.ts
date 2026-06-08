@@ -7,28 +7,30 @@
  *  3. Rotates accounts in a round-robin queue
  *  4. Handles ALL Telegram errors gracefully
  *  5. Enforces daily limits and blackout hours (2–8 AM)
- *  6. Logs every action to activity_log
+ *  6. Logs every action to activity_log AND join_jobs
+ *  7. Detects channels → saves to channel_links, does not join them
+ *  8. Retries unknown errors up to MAX_RETRIES before permanently failing
  *
  * TIMING SAFETY (see timing.ts):
  *  Target: 80–90 joins / account / 18 active hours
  *  ≈ 1 join every 17.2 min per account (with 35% safety buffer + ±25% jitter)
  */
 
-import { eq, and } from "drizzle-orm";
+import { eq, and, lt } from "drizzle-orm";
 import {
   db,
   botStateTable,
   accountsTable,
   groupLinksTable,
   activityLogTable,
+  joinJobsTable,
+  channelLinksTable,
   settingsTable,
 } from "@workspace/db";
 import type { Account } from "@workspace/db";
 import { logger } from "./logger.js";
 import {
   computeActionIntervalMs,
-  isBlackoutHour,
-  msUntilBlackoutEnd,
   isBlackoutHourConfigurable,
   msUntilActiveStartConfigurable,
   floodWaitMs,
@@ -36,10 +38,12 @@ import {
   DAILY_LIMIT,
 } from "./timing.js";
 import { classifyTelegramError } from "./telegramErrors.js";
-import { isRelevantGroup, isRelevantGroupAsync, categorizeChatType, observeGroupAfterJoin } from "./groupFilter.js";
+import { isRelevantGroupAsync, categorizeChatType, observeGroupAfterJoin } from "./groupFilter.js";
 import { getClient, removeClient } from "./clientPool.js";
 import { getDeviceProfileForPhone } from "./deviceProfiles.js";
 import { eventBus } from "./eventBus.js";
+
+const MAX_RETRY_COUNT = 3;
 
 let timer: NodeJS.Timeout | null = null;
 let engineRunning = false;
@@ -106,21 +110,18 @@ async function tick(): Promise<void> {
   if (!engineRunning) return;
 
   try {
-    // Re-check DB in case it was changed externally (e.g., from dashboard Stop button)
     const [state] = await db.select().from(botStateTable).limit(1);
     if (!state?.running) {
       engineRunning = false;
       return;
     }
 
-    // ── P2-3: Configurable sleep schedule ──
-    // Read active_start_hour from settings (default 8 = 8am if not set)
+    // ── Configurable sleep schedule ──
     const settingsRows = await db.select().from(settingsTable);
     const settingsKv: Record<string, string> = {};
     for (const r of settingsRows) settingsKv[r.key] = r.value;
     const activeStartHour = Number(settingsKv["active_start_hour"] ?? 8);
 
-    // P3-1: Sync AI filter enabled state from settings
     const { setAiFilterEnabled } = await import("./aiFilter.js");
     const aiEnabled = settingsKv["ai_filter_enabled"] === "true" ||
       (settingsKv["ai_filter_enabled"] === undefined && !!process.env["GEMINI_API_KEY"]);
@@ -143,7 +144,6 @@ async function tick(): Promise<void> {
 
     const now = new Date();
 
-    // Reset daily counters for accounts that are in a new day
     for (const acc of allActive) {
       if (shouldResetDailyCounter(acc.dailyResetAt)) {
         await db
@@ -155,7 +155,6 @@ async function tick(): Promise<void> {
       }
     }
 
-    // Filter usable accounts (not flood-waited, not at daily limit)
     const usable = allActive.filter((acc) => {
       if (acc.joinedToday >= acc.dailyLimit) return false;
       if (acc.floodWaitUntil && acc.floodWaitUntil > now) return false;
@@ -163,27 +162,40 @@ async function tick(): Promise<void> {
     });
 
     if (usable.length === 0) {
-      // All accounts exhausted — check again in 5 min
       scheduleNext(5 * 60_000);
       return;
     }
 
-    // ── Compute safe interval ──
     const intervalMs = computeActionIntervalMs(usable.length);
-
-    // ── Pick account (round-robin) ──
     const account = pickAccount(usable);
 
     // ── Get next pending link ──
-    const [link] = await db
+    // Also pick up failed links that have retryCount < MAX_RETRY_COUNT
+    let link = await db
       .select()
       .from(groupLinksTable)
       .where(eq(groupLinksTable.status, "pending"))
       .orderBy(groupLinksTable.createdAt)
-      .limit(1);
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+
+    // If no pending links, look for retryable failed links
+    if (!link) {
+      link = await db
+        .select()
+        .from(groupLinksTable)
+        .where(
+          and(
+            eq(groupLinksTable.status, "failed"),
+            lt(groupLinksTable.retryCount, MAX_RETRY_COUNT)
+          )
+        )
+        .orderBy(groupLinksTable.createdAt)
+        .limit(1)
+        .then((rows) => rows[0] ?? null);
+    }
 
     if (!link) {
-      // P2-5: Emit links_exhausted once when queue goes empty
       const [prevLink] = await db
         .select()
         .from(groupLinksTable)
@@ -200,16 +212,21 @@ async function tick(): Promise<void> {
       return;
     }
 
-    // Update current account in bot state
+    // Reset status to pending if picking a retryable failed link
+    if (link.status === "failed") {
+      await db
+        .update(groupLinksTable)
+        .set({ status: "pending" })
+        .where(eq(groupLinksTable.id, link.id));
+      link = { ...link, status: "pending" };
+    }
+
     await db
       .update(botStateTable)
       .set({ currentAccountId: account.id })
       .where(eq(botStateTable.id, state.id));
 
-    // ── Attempt the join ──
     await attemptJoin(account, link);
-
-    // Schedule next action with safe interval
     scheduleNext(intervalMs);
   } catch (err) {
     logger.error({ err }, "Bot engine tick error");
@@ -221,7 +238,7 @@ async function tick(): Promise<void> {
 
 function pickAccount(usable: Account[]): Account {
   accountIndex = accountIndex % usable.length;
-  const account = usable[accountIndex];
+  const account = usable[accountIndex]!;
   accountIndex = (accountIndex + 1) % usable.length;
   return account;
 }
@@ -232,7 +249,6 @@ async function attemptJoin(
   account: Account,
   link: typeof groupLinksTable.$inferSelect
 ): Promise<void> {
-  // Guard: account must have a session
   if (!account.sessionString) {
     await db
       .update(accountsTable)
@@ -245,10 +261,10 @@ async function attemptJoin(
       link.url,
       "NO_SESSION"
     );
+    await logJoinJob(account.id, link.id, "failed", "NO_SESSION", "لا توجد جلسة نشطة");
     return;
   }
 
-  // P2-1: Build device profile for this account (stored in DB or fallback)
   const deviceProfile = {
     deviceModel: account.deviceModel ?? undefined,
     systemVersion: account.systemVersion ?? undefined,
@@ -256,12 +272,10 @@ async function attemptJoin(
     systemLangCode: account.systemLangCode ?? "ar",
     langPack: "tdesktop",
   };
-  // If no device model stored yet, generate one deterministically
   const finalDevice = account.deviceModel
     ? deviceProfile
     : getDeviceProfileForPhone(account.phone);
 
-  // Get or create a client for this account
   let client;
   try {
     client = await getClient(account.phone, account.sessionString, finalDevice);
@@ -274,11 +288,11 @@ async function attemptJoin(
       link.url,
       "CLIENT_ERROR"
     );
+    await logJoinJob(account.id, link.id, "failed", "CLIENT_ERROR", "فشل إنشاء الاتصال");
     return;
   }
 
   try {
-    // Join the group/channel by URL
     const joined = await client.joinChat(link.url);
 
     const groupTitle: string | null = (joined as any)?.title ?? null;
@@ -286,16 +300,46 @@ async function attemptJoin(
     const rawType: string = String((joined as any)?.chatType ?? (joined as any)?.type ?? "");
     const groupType = categorizeChatType(rawType);
 
-    // P2-2: Post-join observation delay (3–10s) + read recent messages for AI classifier
+    // ── Channel detection: leave immediately + save to channel_links ──
+    if (groupType === "channel") {
+      try {
+        await client.leaveChat(chatId ?? link.url);
+      } catch (leaveErr) {
+        logger.debug({ leaveErr, url: link.url }, "Could not leave channel (may be fine)");
+      }
+
+      // Save to channel_links (ignore duplicate)
+      try {
+        await db.insert(channelLinksTable).values({ url: link.url, title: groupTitle }).onConflictDoNothing();
+      } catch {}
+
+      await db
+        .update(groupLinksTable)
+        .set({ status: "skipped", failReason: "channel_type", groupTitle, groupType, processedAt: new Date() })
+        .where(eq(groupLinksTable.id, link.id));
+
+      const msg = `📡 قناة — تم حفظها: ${groupTitle ?? link.url}`;
+      await logActivity("skipped", msg, account.phone, link.url);
+      await logJoinJob(account.id, link.id, "skipped", "CHANNEL_TYPE", "قناة — تم الحفظ في مجموعة القنوات");
+
+      eventBus.publish({
+        type: "channel_detected",
+        message: msg,
+        accountPhone: account.phone,
+        linkUrl: link.url,
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    // ── Post-join observation + AI relevance check ──
     let sampleMessages: string[] = [];
     if (chatId) {
       sampleMessages = await observeGroupAfterJoin(client, chatId, link.url);
     }
 
-    // P3-1 + keyword: Check relevance with AI when available
     const relevant = await isRelevantGroupAsync(groupTitle, null, sampleMessages);
 
-    // Update link record
     await db
       .update(groupLinksTable)
       .set({
@@ -308,7 +352,6 @@ async function attemptJoin(
       })
       .where(eq(groupLinksTable.id, link.id));
 
-    // Update account counters
     await db
       .update(accountsTable)
       .set({
@@ -319,21 +362,17 @@ async function attemptJoin(
       })
       .where(eq(accountsTable.id, account.id));
 
-    // P2-5: Emit join_success event
+    const msg = `✅ انضمام: ${groupTitle ?? link.url} [${account.phone}]`;
     eventBus.publish({
       type: "join_success",
-      message: `✅ انضمام: ${groupTitle ?? link.url} [${account.phone}]`,
+      message: msg,
       accountPhone: account.phone,
       linkUrl: link.url,
       timestamp: new Date().toISOString(),
     });
 
-    await logActivity(
-      "join_success",
-      `✅ انضمام: ${groupTitle ?? link.url} [${account.phone}]`,
-      account.phone,
-      link.url
-    );
+    await logActivity("join_success", msg, account.phone, link.url);
+    await logJoinJob(account.id, link.id, "success");
   } catch (err) {
     await handleJoinError(account, link, err);
   }
@@ -359,7 +398,7 @@ async function handleJoinError(
         .where(eq(accountsTable.id, account.id));
       const msg = `⏳ FLOOD_WAIT ${waitSecs}s — الحساب ${account.phone}`;
       await logActivity("flood_wait", msg, account.phone, link.url, info.code, waitSecs);
-      // P2-5: Alert for long flood waits (>1 hour)
+      await logJoinJob(account.id, link.id, "flood_wait", info.code, `انتظر ${waitSecs} ثانية`);
       if (waitSecs > 3600) {
         eventBus.publish({
           type: "flood_wait_long",
@@ -380,7 +419,7 @@ async function handleJoinError(
         .where(eq(accountsTable.id, account.id));
       const msg = `🚫 PEER_FLOOD — الحساب ${account.phone} محظور 24 ساعة`;
       await logActivity("flood_wait", msg, account.phone, link.url, info.code, 86400);
-      // P2-5: Always alert for peer_flood (very serious)
+      await logJoinJob(account.id, link.id, "flood_wait", info.code, "PEER_FLOOD — 24 ساعة");
       eventBus.publish({
         type: "flood_wait_long",
         message: msg,
@@ -399,7 +438,7 @@ async function handleJoinError(
       await removeClient(account.phone);
       const msg = `⛔ CHANNELS_TOO_MUCH — الحساب ${account.phone} وصل لحد القنوات`;
       await logActivity("join_failed", msg, account.phone, link.url, info.code);
-      // P2-5: Critical event — channels limit reached
+      await logJoinJob(account.id, link.id, "failed", info.code, "وصل لحد القنوات (500)");
       eventBus.publish({
         type: "channels_limit",
         message: msg,
@@ -410,18 +449,17 @@ async function handleJoinError(
     }
 
     case "already_joined": {
+      // Mark link as joined — but do NOT count toward joinedToday to avoid burning daily limit
       await db
         .update(groupLinksTable)
         .set({ status: "joined", usedByAccountId: account.id, processedAt: new Date() })
         .where(eq(groupLinksTable.id, link.id));
       await db
         .update(accountsTable)
-        .set({
-          joinedCount: account.joinedCount + 1,
-          joinedToday: account.joinedToday + 1,
-        })
+        .set({ joinedCount: account.joinedCount + 1 })
         .where(eq(accountsTable.id, account.id));
       await logActivity("join_success", `✅ مشترك مسبقاً: ${link.url}`, account.phone, link.url, info.code);
+      await logJoinJob(account.id, link.id, "success", info.code, "مشترك مسبقاً");
       break;
     }
 
@@ -433,7 +471,7 @@ async function handleJoinError(
       await removeClient(account.phone);
       const msg = `🔑 ${info.code} — الحساب ${account.phone} يحتاج إعادة تسجيل الدخول`;
       await logActivity("join_failed", msg, account.phone, link.url, info.code);
-      // P2-4 + P2-5: Critical — notify user to re-authenticate
+      await logJoinJob(account.id, link.id, "failed", info.code, "انتهت الجلسة — يحتاج re-auth");
       eventBus.publish({
         type: "account_needs_auth",
         message: msg,
@@ -451,7 +489,7 @@ async function handleJoinError(
       await removeClient(account.phone);
       const msg = `🔴 الحساب ${account.phone} محظور من تيليجرام`;
       await logActivity("join_failed", msg, account.phone, link.url, info.code);
-      // P2-5: Critical — account banned
+      await logJoinJob(account.id, link.id, "failed", info.code, "الحساب محظور نهائياً");
       eventBus.publish({
         type: "account_banned",
         message: msg,
@@ -471,19 +509,36 @@ async function handleJoinError(
         .set({ failedCount: account.failedCount + 1 })
         .where(eq(accountsTable.id, account.id));
       await logActivity("join_failed", `❌ ${info.code}: ${link.url}`, account.phone, link.url, info.code);
+      await logJoinJob(account.id, link.id, "failed", info.code, "الرابط معطل أو خاص");
       break;
     }
 
     default: {
+      // Unknown error — retry up to MAX_RETRY_COUNT times before permanently failing
+      const newRetryCount = (link.retryCount ?? 0) + 1;
+      const isExhausted = newRetryCount >= MAX_RETRY_COUNT;
+
       await db
         .update(groupLinksTable)
-        .set({ status: "failed", failReason: info.code, processedAt: new Date() })
+        .set({
+          status: isExhausted ? "failed" : "pending",
+          failReason: isExhausted ? info.code : null,
+          retryCount: newRetryCount,
+          processedAt: isExhausted ? new Date() : null,
+        })
         .where(eq(groupLinksTable.id, link.id));
+
       await db
         .update(accountsTable)
         .set({ failedCount: account.failedCount + 1 })
         .where(eq(accountsTable.id, account.id));
-      await logActivity("join_failed", `❓ خطأ غير متوقع: ${info.code} — ${link.url}`, account.phone, link.url, info.code);
+
+      const retryNote = isExhausted
+        ? `(${newRetryCount}/${MAX_RETRY_COUNT} محاولات — فشل نهائي)`
+        : `(محاولة ${newRetryCount}/${MAX_RETRY_COUNT} — سيُعاد المحاولة)`;
+      const msg = `❓ خطأ غير متوقع: ${info.code} — ${link.url} ${retryNote}`;
+      await logActivity("join_failed", msg, account.phone, link.url, info.code);
+      await logJoinJob(account.id, link.id, isExhausted ? "failed" : "pending", info.code, retryNote);
     }
   }
 }
@@ -509,5 +564,25 @@ async function logActivity(
     });
   } catch (e) {
     logger.error({ err: e }, "Failed to insert activity log");
+  }
+}
+
+async function logJoinJob(
+  accountId: number,
+  linkId: number,
+  status: string,
+  errorCode?: string,
+  errorMessage?: string
+): Promise<void> {
+  try {
+    await db.insert(joinJobsTable).values({
+      accountId,
+      linkId,
+      status,
+      errorCode: errorCode ?? null,
+      errorMessage: errorMessage ?? null,
+    });
+  } catch (e) {
+    logger.error({ err: e }, "Failed to insert join job");
   }
 }

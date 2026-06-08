@@ -5,3 +5,4 @@ export * from "./collections";
 export * from "./activityLog";
 export * from "./botState";
 export * from "./settings";
+export * from "./channelLinks";

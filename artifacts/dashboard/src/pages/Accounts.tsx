@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import {
   useListAccounts,
   useUpdateAccount,
@@ -18,7 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Users, Plus, Trash2, KeyRound, CheckCircle2, Wifi, WifiOff } from "lucide-react";
+import { Users, Plus, Trash2, KeyRound, CheckCircle2, Wifi, WifiOff, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
@@ -306,6 +307,25 @@ export default function Accounts() {
     );
   };
 
+  const [syncingId, setSyncingId] = useState<number | null>(null);
+
+  const syncDialogs = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`/api/accounts/${id}/sync-dialogs`, { method: "POST" });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    onSuccess: (data, id) => {
+      invalidate();
+      setSyncingId(null);
+      toast({ title: "✅ تم مزامنة عدد القنوات", description: `العدد الحقيقي: ${data.channelsCount}` });
+    },
+    onError: (e: any, id) => {
+      setSyncingId(null);
+      toast({ title: "فشل المزامنة", description: e?.message, variant: "destructive" });
+    },
+  });
+
   const needsAuthAccounts = accounts?.filter((a) => a.status === "needs_auth" || !a.hasSession) ?? [];
 
   return (
@@ -430,6 +450,21 @@ export default function Accounts() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
+                      {/* Sync dialogs count button */}
+                      {acc.hasSession && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => { setSyncingId(acc.id); syncDialogs.mutate(acc.id); }}
+                          disabled={syncingId === acc.id}
+                          className="font-mono text-xs gap-1 border-muted-foreground/30 text-muted-foreground hover:text-foreground"
+                          title="مزامنة عدد القنوات الحقيقي من تيليجرام"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${syncingId === acc.id ? "animate-spin" : ""}`} />
+                          SYNC
+                        </Button>
+                      )}
+
                       {/* Auth button — shown for all accounts (can re-auth at any time) */}
                       <AuthDialog phone={acc.phone} onDone={invalidate} />
 

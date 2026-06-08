@@ -12,6 +12,7 @@ import Jobs from "@/pages/Jobs";
 import Collections from "@/pages/Collections";
 import Settings from "@/pages/Settings";
 import Analytics from "@/pages/Analytics";
+import Channels from "@/pages/Channels";
 
 const queryClient = new QueryClient();
 
@@ -24,6 +25,7 @@ function Router() {
         <Route path="/links" component={Links} />
         <Route path="/jobs" component={Jobs} />
         <Route path="/collections" component={Collections} />
+        <Route path="/channels" component={Channels} />
         <Route path="/settings" component={Settings} />
         <Route path="/analytics" component={Analytics} />
         <Route component={NotFound} />
