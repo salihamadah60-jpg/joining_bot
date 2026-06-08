@@ -1,0 +1,61 @@
+2026-06-08T21:06:14.931104521Z [inf]  scheduling build on Metal builder "production-builderv3-us-west1-8jjr"
+2026-06-08T21:06:15.776567146Z [inf]  unpacking archive
+2026-06-08T21:06:15.838840645Z [inf]  using build driver nixpacks-v1.41.0
+2026-06-08T21:06:15.842221477Z [inf]  uploading snapshot
+2026-06-08T21:06:15.931375988Z [inf]  
+2026-06-08T21:06:15.931381165Z [inf]  ╔══════════════════════════════ Nixpacks v1.41.0 ══════════════════════════════╗
+2026-06-08T21:06:15.931382310Z [inf]  ║ setup      │ nodejs_20, pnpm, python3, gnumake, gcc, pkg-config              ║
+2026-06-08T21:06:15.931387540Z [inf]  ║──────────────────────────────────────────────────────────────────────────────║
+2026-06-08T21:06:15.931388161Z [inf]  ║ install    │ pnpm i --frozen-lockfile                                        ║
+2026-06-08T21:06:15.931389170Z [inf]  ║──────────────────────────────────────────────────────────────────────────────║
+2026-06-08T21:06:15.931389786Z [inf]  ║ build      │ pnpm install && pnpm --filter @workspace/api-server run build   ║
+2026-06-08T21:06:15.931390401Z [inf]  ║            │ && pnpm --filter @workspace/dashboard run build                 ║
+2026-06-08T21:06:15.931391371Z [inf]  ║──────────────────────────────────────────────────────────────────────────────║
+2026-06-08T21:06:15.931392038Z [inf]  ║ start      │ node --enable-source-maps artifacts/api-server/dist/index.mjs   ║
+2026-06-08T21:06:15.931393237Z [inf]  ╚══════════════════════════════════════════════════════════════════════════════╝
+2026-06-08T21:06:15.931393781Z [inf]  
+2026-06-08T21:06:15.931843036Z [inf]  
+2026-06-08T21:06:15.931845074Z [inf]  Saved output to:
+2026-06-08T21:06:15.931846103Z [inf]    snapshot-target-unpack
+2026-06-08T21:06:15.990945662Z [inf]  [internal] load build definition from Dockerfile
+2026-06-08T21:06:15.990946835Z [inf]  [internal] load build definition from Dockerfile
+2026-06-08T21:06:15.990947775Z [inf]  [internal] load build definition from Dockerfile
+2026-06-08T21:06:16.002476810Z [inf]  [internal] load build definition from Dockerfile
+2026-06-08T21:06:16.007017581Z [inf]  [internal] load metadata for ghcr.io/railwayapp/nixpacks:ubuntu-1745885067
+2026-06-08T21:06:16.168207861Z [inf]  [internal] load metadata for ghcr.io/railwayapp/nixpacks:ubuntu-1745885067
+2026-06-08T21:06:16.168816367Z [inf]  [internal] load .dockerignore
+2026-06-08T21:06:16.168825731Z [inf]  [internal] load .dockerignore
+2026-06-08T21:06:16.169691164Z [inf]  [internal] load .dockerignore
+2026-06-08T21:06:16.179852458Z [inf]  [internal] load .dockerignore
+2026-06-08T21:06:16.183570957Z [wrn]  UndefinedVar: Usage of undefined variable '$NIXPACKS_PATH' (line 18)(https://docs.docker.com/go/dockerfile/rule/undefined-var/)
+ details: Variables should be defined before their use
+
+2026-06-08T21:06:16.185951116Z [inf]  [stage-0 10/10] COPY . /app
+2026-06-08T21:06:16.185952066Z [inf]  [stage-0  9/10] RUN printf '\nPATH=/app/node_modules/.bin:$PATH' >> /root/.profile
+2026-06-08T21:06:16.185953369Z [inf]  [stage-0  8/10] RUN --mount=type=cache,id=s/7fc5f86c-614c-439b-908e-2ec796af3116-node_modules/cache,target=/app/node_modules/.cache pnpm install && pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/dashboard run build
+2026-06-08T21:06:16.185954295Z [inf]  [stage-0  7/10] COPY . /app/.
+2026-06-08T21:06:16.185955084Z [inf]  [stage-0  6/10] RUN --mount=type=cache,id=s/7fc5f86c-614c-439b-908e-2ec796af3116-/root/local/share/pnpm/store/v3,target=/root/.local/share/pnpm/store/v3 pnpm i --frozen-lockfile
+2026-06-08T21:06:16.185955946Z [inf]  [stage-0  5/10] COPY . /app/.
+2026-06-08T21:06:16.185956748Z [inf]  [stage-0  4/10] RUN nix-env -if .nixpacks/nixpkgs-ffeebf0acf3ae8b29f8c7049cd911b9636efd7e7.nix && nix-collect-garbage -d
+2026-06-08T21:06:16.185957413Z [inf]  [stage-0  3/10] COPY .nixpacks/nixpkgs-ffeebf0acf3ae8b29f8c7049cd911b9636efd7e7.nix .nixpacks/nixpkgs-ffeebf0acf3ae8b29f8c7049cd911b9636efd7e7.nix
+2026-06-08T21:06:16.185958188Z [inf]  [internal] load build context
+2026-06-08T21:06:16.185959251Z [inf]  [stage-0  2/10] WORKDIR /app/
+2026-06-08T21:06:16.185960611Z [inf]  [stage-0  1/10] FROM ghcr.io/railwayapp/nixpacks:ubuntu-1745885067@sha256:d45c89d80e13d7ad0fd555b5130f22a866d9dd10e861f589932303ef2314c7de
+2026-06-08T21:06:16.185961420Z [inf]  [stage-0  1/10] FROM ghcr.io/railwayapp/nixpacks:ubuntu-1745885067@sha256:d45c89d80e13d7ad0fd555b5130f22a866d9dd10e861f589932303ef2314c7de
+2026-06-08T21:06:16.186112431Z [inf]  [internal] load build context
+2026-06-08T21:06:16.186870851Z [inf]  [internal] load build context
+2026-06-08T21:06:16.227454703Z [inf]  [internal] load build context
+2026-06-08T21:06:16.238133176Z [inf]  [stage-0  2/10] WORKDIR /app/
+2026-06-08T21:06:16.238134230Z [inf]  [stage-0  3/10] COPY .nixpacks/nixpkgs-ffeebf0acf3ae8b29f8c7049cd911b9636efd7e7.nix .nixpacks/nixpkgs-ffeebf0acf3ae8b29f8c7049cd911b9636efd7e7.nix
+2026-06-08T21:06:16.238135175Z [inf]  [stage-0  4/10] RUN nix-env -if .nixpacks/nixpkgs-ffeebf0acf3ae8b29f8c7049cd911b9636efd7e7.nix && nix-collect-garbage -d
+2026-06-08T21:06:16.238141620Z [inf]  [stage-0  5/10] COPY . /app/.
+2026-06-08T21:06:16.412218271Z [inf]  [stage-0  5/10] COPY . /app/.
+2026-06-08T21:06:16.416924174Z [inf]  [stage-0  6/10] RUN --mount=type=cache,id=s/7fc5f86c-614c-439b-908e-2ec796af3116-/root/local/share/pnpm/store/v3,target=/root/.local/share/pnpm/store/v3 pnpm i --frozen-lockfile
+2026-06-08T21:06:17.120932409Z [inf]  Scope: all 9 workspace projects
+
+2026-06-08T21:06:17.255385911Z [inf]   ERR_PNPM_LOCKFILE_CONFIG_MISMATCH  Cannot proceed with the frozen installation. The current "overrides" configuration doesn't match the value found in the lockfile
+
+Update your lockfile using "pnpm install --no-frozen-lockfile"
+
+2026-06-08T21:06:17.456654184Z [err]  [stage-0  6/10] RUN --mount=type=cache,id=s/7fc5f86c-614c-439b-908e-2ec796af3116-/root/local/share/pnpm/store/v3,target=/root/.local/share/pnpm/store/v3 pnpm i --frozen-lockfile
+2026-06-08T21:06:17.531685437Z [err]  Build Failed: build daemon returned an error < failed to solve: process "/bin/bash -ol pipefail -c pnpm i --frozen-lockfile" did not complete successfully: exit code: 1 >
