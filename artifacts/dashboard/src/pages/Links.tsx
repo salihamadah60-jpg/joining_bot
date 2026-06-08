@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Link as LinkIcon, Plus, Trash2, Filter } from "lucide-react";
+import { Link as LinkIcon, Plus, Trash2, Filter, RotateCcw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { useMutation } from "@tanstack/react-query";
 
 export default function Links() {
   const queryClient = useQueryClient();
@@ -48,6 +49,21 @@ export default function Links() {
       }
     });
   };
+
+  const retryLink = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/links/${id}/retry`, { method: "POST" });
+      if (!res.ok) throw new Error("فشلت إعادة المحاولة");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/links"] });
+      toast({ title: "✅ تمت إعادة الجدولة", description: "سيُعاد محاولة الرابط في أقرب وقت" });
+    },
+    onError: () => {
+      toast({ title: "خطأ", description: "فشلت إعادة المحاولة", variant: "destructive" });
+    },
+  });
 
   const handleDelete = (id: number) => {
     deleteLink.mutate({ id }, {
@@ -144,9 +160,23 @@ export default function Links() {
                   <TableCell className="text-muted-foreground">{link.source || 'MANUAL'}</TableCell>
                   <TableCell className="text-muted-foreground">{format(new Date(link.createdAt), "yyyy-MM-dd HH:mm")}</TableCell>
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(link.id)} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    <div className="flex items-center justify-end gap-1">
+                      {link.status === "failed" && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => retryLink.mutate(link.id)}
+                          disabled={retryLink.isPending}
+                          title="إعادة المحاولة فوراً"
+                          className="text-primary hover:bg-primary/10 hover:text-primary"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="icon" onClick={() => handleDelete(link.id)} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

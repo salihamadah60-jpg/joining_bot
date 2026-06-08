@@ -111,6 +111,18 @@ router.post("/links/bulk", async (req, res): Promise<void> => {
   res.status(201).json({ added, duplicates, errors, total: rawUrls.length, extracted: rawUrls.length });
 });
 
+router.post("/links/:id/retry", async (req, res): Promise<void> => {
+  const id = Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+  if (!id || isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const [updated] = await db
+    .update(groupLinksTable)
+    .set({ status: "pending", retryAfter: null, failReason: null })
+    .where(eq(groupLinksTable.id, id))
+    .returning();
+  if (!updated) { res.status(404).json({ error: "Link not found" }); return; }
+  res.json(serializeLink(updated));
+});
+
 router.delete("/links/:id", async (req, res): Promise<void> => {
   const params = DeleteLinkParams.safeParse({ id: Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) });
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
