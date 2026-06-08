@@ -2,28 +2,15 @@
  * TELEGRAM CLIENT POOL
  *
  * Manages a pool of TelegramClient instances — one per phone number.
- * Clients are created on demand and cached.
- * Uses SQLite storage files (one per account) for session persistence.
- * If the session file doesn't exist but a session string is available (from DB),
- * the session is imported so the account can reconnect without re-authentication.
- *
- * P2-1: Each client is initialized with a unique device profile (device_model,
- * system_version, app_version) so every account looks like a different real device.
+ * Uses MemoryStorage (NO SQLite / better-sqlite3).
+ * Session strings are imported from PostgreSQL on client creation.
  */
 
 import { TelegramClient } from "@mtcute/node";
-import path from "path";
-import { fileURLToPath } from "url";
-import { mkdirSync } from "fs";
+import { MemoryStorage } from "@mtcute/core";
 import { logger } from "./logger.js";
 import { db, settingsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
 import type { DeviceProfile } from "./deviceProfiles.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const SESSIONS_DIR = path.join(__dirname, "../../../../sessions");
-
-mkdirSync(SESSIONS_DIR, { recursive: true });
 
 interface CachedClient {
   client: TelegramClient;
@@ -32,11 +19,6 @@ interface CachedClient {
 }
 
 const pool = new Map<string, CachedClient>();
-
-function sessionFilePath(phone: string): string {
-  const safe = phone.replace(/\D/g, "");
-  return path.join(SESSIONS_DIR, `${safe}.db`);
-}
 
 // Cache DB credentials to avoid a DB hit on every client creation
 let cachedApiId: number | null = null;
@@ -48,19 +30,12 @@ export function invalidateCredentialsCache(): void {
 }
 
 async function getApiCredentials(): Promise<{ apiId: number; apiHash: string }> {
-  // 1. Environment variables take priority
   const envApiId = Number(process.env["TELEGRAM_API_ID"]);
   const envApiHash = process.env["TELEGRAM_API_HASH"] ?? "";
-  if (envApiId && envApiHash) {
-    return { apiId: envApiId, apiHash: envApiHash };
-  }
+  if (envApiId && envApiHash) return { apiId: envApiId, apiHash: envApiHash };
 
-  // 2. Cached DB values
-  if (cachedApiId && cachedApiHash) {
-    return { apiId: cachedApiId, apiHash: cachedApiHash };
-  }
+  if (cachedApiId && cachedApiHash) return { apiId: cachedApiId, apiHash: cachedApiHash };
 
-  // 3. Read from settings table
   const rows = await db.select().from(settingsTable);
   const kv: Record<string, string> = {};
   for (const r of rows) kv[r.key] = r.value;
@@ -81,9 +56,8 @@ async function getApiCredentials(): Promise<{ apiId: number; apiHash: string }> 
 
 /**
  * Get or create a connected TelegramClient for the given phone number.
- * @param phone - Phone number in international format (+XXXXXXXXX)
- * @param sessionString - Optional session string from DB for restore if file is missing
- * @param deviceProfile - Optional device fingerprint for P2-1 device diversity
+ * Uses MemoryStorage — no SQLite files.
+ * If sessionString is provided, the session is imported so no re-auth is needed.
  */
 export async function getClient(
   phone: string,
@@ -97,74 +71,65 @@ export async function getClient(
   }
 
   const { apiId, apiHash } = await getApiCredentials();
-  const storagePath = sessionFilePath(phone);
 
-  // P2-1: Build client options with device fingerprint
-  const clientOptions: Record<string, unknown> = { apiId, apiHash, storage: storagePath };
+  const clientOptions: Record<string, unknown> = {
+    apiId,
+    apiHash,
+    storage: new MemoryStorage(),
+  };
+
   if (deviceProfile) {
     clientOptions["deviceModel"] = deviceProfile.deviceModel;
     clientOptions["systemVersion"] = deviceProfile.systemVersion;
     clientOptions["appVersion"] = deviceProfile.appVersion;
     clientOptions["systemLangCode"] = deviceProfile.systemLangCode;
     clientOptions["langPack"] = deviceProfile.langPack;
-    logger.debug({ phone, device: deviceProfile.deviceModel }, "Using device profile");
   }
 
   const client = new TelegramClient(clientOptions as any);
 
-  // If we have a session string backup from DB, import it
   if (sessionString) {
     try {
       await client.importSession(sessionString);
     } catch (err) {
-      logger.warn({ phone, err }, "Failed to import session string, will try connecting anyway");
+      logger.warn({ phone, err }, "Failed to import session string, will connect fresh");
     }
   }
 
   await client.connect();
 
   pool.set(phone, { client, lastUsed: new Date(), phone });
-  logger.info({ phone, device: deviceProfile?.deviceModel ?? "default" }, "TelegramClient connected and cached");
+  logger.info({ phone, device: deviceProfile?.deviceModel ?? "default" }, "TelegramClient connected");
   return client;
 }
 
 /**
- * Create a temporary TelegramClient for auth flow (send-code → verify → save session).
- * Does NOT add to pool — caller manages lifecycle.
+ * Create a temporary TelegramClient for auth flow — uses MemoryStorage.
  */
-export async function createTempClient(storagePath: string): Promise<TelegramClient> {
+export async function createTempClient(): Promise<TelegramClient> {
   const { apiId, apiHash } = await getApiCredentials();
-  return new TelegramClient({ apiId, apiHash, storage: storagePath });
+  return new TelegramClient({ apiId, apiHash, storage: new MemoryStorage() });
 }
 
 /**
- * Remove and destroy a cached client (e.g., after session revocation).
+ * Remove and destroy a cached client.
  */
 export async function removeClient(phone: string): Promise<void> {
   const cached = pool.get(phone);
   if (cached) {
     pool.delete(phone);
-    try {
-      await cached.client.destroy();
-    } catch (_) {
-      // ignore cleanup errors
-    }
+    try { await cached.client.destroy(); } catch (_) {}
     logger.info({ phone }, "TelegramClient removed from pool");
   }
 }
 
 /**
  * Export the current session string from a cached client.
- * Used to persist session back to DB after re-auth.
  */
 export async function exportClientSession(phone: string): Promise<string | null> {
   const cached = pool.get(phone);
   if (!cached) return null;
-  try {
-    return await cached.client.exportSession();
-  } catch (_) {
-    return null;
-  }
+  try { return await cached.client.exportSession(); } catch (_) { return null; }
 }
 
 /**
@@ -175,19 +140,12 @@ export async function cleanupIdleClients(maxIdleMs = 30 * 60 * 1000): Promise<vo
   for (const [phone, entry] of pool.entries()) {
     if (now - entry.lastUsed.getTime() > maxIdleMs) {
       pool.delete(phone);
-      try {
-        await entry.client.destroy();
-      } catch (_) {
-        // ignore
-      }
+      try { await entry.client.destroy(); } catch (_) {}
       logger.info({ phone }, "Idle TelegramClient cleaned up");
     }
   }
 }
 
-/**
- * Return all currently pooled phone numbers (for diagnostics).
- */
 export function getPooledPhones(): string[] {
   return [...pool.keys()];
 }
