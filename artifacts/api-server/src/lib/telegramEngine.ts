@@ -16,7 +16,7 @@
  *  ≈ 1 join every 17.2 min per account (with 35% safety buffer + ±25% jitter)
  */
 
-import { eq, and, lt } from "drizzle-orm";
+import { eq, and, lt, lte, asc, isNotNull } from "drizzle-orm";
 import {
   db,
   botStateTable,
@@ -44,6 +44,7 @@ import { getDeviceProfileForPhone } from "./deviceProfiles.js";
 import { eventBus } from "./eventBus.js";
 
 const MAX_RETRY_COUNT = 3;
+const RETRY_DELAY_MS = 60 * 60 * 1000; // 1 hour between retries
 
 let timer: NodeJS.Timeout | null = null;
 let engineRunning = false;
@@ -136,13 +137,25 @@ async function tick(): Promise<void> {
       return;
     }
 
-    // ── Get active accounts ──
+    const now = new Date();
+
+    // ── Auto-reset expired flood_wait accounts ──
+    await db
+      .update(accountsTable)
+      .set({ status: "active", floodWaitUntil: null })
+      .where(
+        and(
+          eq(accountsTable.status, "flood_wait"),
+          lte(accountsTable.floodWaitUntil, now)
+        )
+      );
+
+    // ── Get active accounts (ORDER BY id for stable round-robin) ──
     const allActive = await db
       .select()
       .from(accountsTable)
-      .where(eq(accountsTable.status, "active"));
-
-    const now = new Date();
+      .where(eq(accountsTable.status, "active"))
+      .orderBy(asc(accountsTable.id));
 
     for (const acc of allActive) {
       if (shouldResetDailyCounter(acc.dailyResetAt)) {
@@ -157,7 +170,6 @@ async function tick(): Promise<void> {
 
     const usable = allActive.filter((acc) => {
       if (acc.joinedToday >= acc.dailyLimit) return false;
-      if (acc.floodWaitUntil && acc.floodWaitUntil > now) return false;
       return true;
     });
 
@@ -169,17 +181,16 @@ async function tick(): Promise<void> {
     const intervalMs = computeActionIntervalMs(usable.length);
     const account = pickAccount(usable);
 
-    // ── Get next pending link ──
-    // Also pick up failed links that have retryCount < MAX_RETRY_COUNT
+    // ── Get next link: pending first, then due-for-retry failed links ──
     let link = await db
       .select()
       .from(groupLinksTable)
       .where(eq(groupLinksTable.status, "pending"))
-      .orderBy(groupLinksTable.createdAt)
+      .orderBy(asc(groupLinksTable.createdAt))
       .limit(1)
       .then((rows) => rows[0] ?? null);
 
-    // If no pending links, look for retryable failed links
+    // If no pending links, look for retryable failed links whose delay has passed
     if (!link) {
       link = await db
         .select()
@@ -187,10 +198,14 @@ async function tick(): Promise<void> {
         .where(
           and(
             eq(groupLinksTable.status, "failed"),
-            lt(groupLinksTable.retryCount, MAX_RETRY_COUNT)
+            lt(groupLinksTable.retryCount, MAX_RETRY_COUNT),
+            and(
+              isNotNull(groupLinksTable.retryAfter),
+              lte(groupLinksTable.retryAfter, now)
+            )
           )
         )
-        .orderBy(groupLinksTable.createdAt)
+        .orderBy(asc(groupLinksTable.retryAfter))
         .limit(1)
         .then((rows) => rows[0] ?? null);
     }
@@ -212,13 +227,13 @@ async function tick(): Promise<void> {
       return;
     }
 
-    // Reset status to pending if picking a retryable failed link
+    // Reset failed links back to pending before attempting
     if (link.status === "failed") {
       await db
         .update(groupLinksTable)
-        .set({ status: "pending" })
+        .set({ status: "pending", retryAfter: null })
         .where(eq(groupLinksTable.id, link.id));
-      link = { ...link, status: "pending" };
+      link = { ...link, status: "pending", retryAfter: null };
     }
 
     await db
@@ -514,17 +529,19 @@ async function handleJoinError(
     }
 
     default: {
-      // Unknown error — retry up to MAX_RETRY_COUNT times before permanently failing
+      // Unknown error — retry up to MAX_RETRY_COUNT times with 1-hour delay between retries
       const newRetryCount = (link.retryCount ?? 0) + 1;
       const isExhausted = newRetryCount >= MAX_RETRY_COUNT;
+      const retryAfterTime = isExhausted ? null : new Date(Date.now() + RETRY_DELAY_MS);
 
       await db
         .update(groupLinksTable)
         .set({
-          status: isExhausted ? "failed" : "pending",
-          failReason: isExhausted ? info.code : null,
+          status: "failed",
+          failReason: info.code,
           retryCount: newRetryCount,
-          processedAt: isExhausted ? new Date() : null,
+          retryAfter: retryAfterTime,
+          processedAt: new Date(),
         })
         .where(eq(groupLinksTable.id, link.id));
 
@@ -535,7 +552,7 @@ async function handleJoinError(
 
       const retryNote = isExhausted
         ? `(${newRetryCount}/${MAX_RETRY_COUNT} محاولات — فشل نهائي)`
-        : `(محاولة ${newRetryCount}/${MAX_RETRY_COUNT} — سيُعاد المحاولة)`;
+        : `(محاولة ${newRetryCount}/${MAX_RETRY_COUNT} — إعادة المحاولة بعد ساعة)`;
       const msg = `❓ خطأ غير متوقع: ${info.code} — ${link.url} ${retryNote}`;
       await logActivity("join_failed", msg, account.phone, link.url, info.code);
       await logJoinJob(account.id, link.id, isExhausted ? "failed" : "pending", info.code, retryNote);
