@@ -1,0 +1,14 @@
+[build]
+builder = "nixpacks"
+buildCommand = "pnpm install && pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/dashboard run build"
+
+[deploy]
+startCommand = "node --enable-source-maps artifacts/api-server/dist/index.mjs"
+healthcheckPath = "/api/healthz"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+[deploy.envs]
+NODE_ENV = "production"
+PORT = "8080"
