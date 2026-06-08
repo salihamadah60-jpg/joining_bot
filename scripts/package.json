@@ -7,6 +7,7 @@
     "hello": "tsx ./src/hello.ts",
     "push-github": "tsx ./src/push-to-github.ts",
     "export-db": "tsx ./src/export-db.ts",
+    "auto-sync": "tsx ./src/auto-sync.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

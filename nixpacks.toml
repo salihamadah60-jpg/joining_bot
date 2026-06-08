@@ -1,14 +1,2 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "pnpm", "python3", "gnumake", "gcc", "pkg-config"]
-
-[phases.install]
-cmds = ["pnpm install"]
-
-[phases.build]
-cmds = [
-  "pnpm --filter @workspace/api-server run build",
-  "pnpm --filter @workspace/dashboard run build"
-]
-
-[start]
-cmd = "node --enable-source-maps artifacts/api-server/dist/index.mjs"
+nixPkgs = ["python3", "gnumake", "gcc", "pkg-config"]
