@@ -8,10 +8,16 @@
     "push-github": "tsx ./src/push-to-github.ts",
     "export-db": "tsx ./src/export-db.ts",
     "auto-sync": "tsx ./src/auto-sync.ts",
+    "import-mongo": "tsx ./src/import-mongo-sessions.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "mongodb": "^7.2.0",
+    "pg": "^8.16.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/pg": "^8.11.14",
     "tsx": "catalog:"
   }
 }
