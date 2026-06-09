@@ -3,13 +3,14 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 import type { GroupLinkGroupType } from './groupLinkGroupType';
 import type { GroupLinkStatus } from './groupLinkStatus';
 
 export interface GroupLink {
-  id: number;
+  /** MongoDB ObjectId string */
+  id: string;
   url: string;
   status: GroupLinkStatus;
   /** @nullable */
@@ -20,8 +21,11 @@ export interface GroupLink {
   groupType?: GroupLinkGroupType;
   /** @nullable */
   source?: string | null;
-  /** @nullable */
-  usedByAccountId?: number | null;
+  /**
+     * Phone number of the account that joined this link
+     * @nullable
+     */
+  usedByAccountPhone?: string | null;
   createdAt: string;
   /** @nullable */
   processedAt?: string | null;

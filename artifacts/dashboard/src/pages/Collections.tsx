@@ -30,11 +30,11 @@ export default function Collections() {
   const syncCollection = useSyncCollection();
 
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [editId, setEditId] = useState<number | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
   const [formData, setFormData] = useState<FormData>(EMPTY_FORM);
 
   const editMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: FormData }) => {
+    mutationFn: async ({ id, data }: { id: string; data: FormData }) => {
       const r = await fetch(`/api/collections/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -78,7 +78,7 @@ export default function Collections() {
     setEditId(col.id);
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     if (confirm("حذف هذا المصدر نهائياً؟")) {
       deleteCollection.mutate({ id }, {
         onSuccess: () => {
@@ -89,7 +89,7 @@ export default function Collections() {
     }
   };
 
-  const handleSync = (id: number) => {
+  const handleSync = (id: string) => {
     syncCollection.mutate({ id }, {
       onSuccess: (data: any) => {
         queryClient.invalidateQueries({ queryKey: ["/api/collections"] });

@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 
 export type ActivityEntryType = typeof ActivityEntryType[keyof typeof ActivityEntryType];
@@ -18,4 +18,5 @@ export const ActivityEntryType = {
   bot_started: 'bot_started',
   bot_stopped: 'bot_stopped',
   sync_completed: 'sync_completed',
+  channel_detected: 'channel_detected',
 } as const;

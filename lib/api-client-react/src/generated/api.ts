@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 import {
   useMutation,
@@ -289,7 +289,7 @@ export const useCreateAccount = <TError = ErrorType<unknown>,
       return useMutation(getCreateAccountMutationOptions(options));
     }
 
-export const getGetAccountUrl = (id: number,) => {
+export const getGetAccountUrl = (id: string,) => {
 
 
 
@@ -300,7 +300,7 @@ export const getGetAccountUrl = (id: number,) => {
 /**
  * @summary Get account by ID
  */
-export const getAccount = async (id: number, options?: RequestInit): Promise<Account> => {
+export const getAccount = async (id: string, options?: RequestInit): Promise<Account> => {
 
   return customFetch<Account>(getGetAccountUrl(id),
   {
@@ -315,14 +315,14 @@ export const getAccount = async (id: number, options?: RequestInit): Promise<Acc
 
 
 
-export const getGetAccountQueryKey = (id: number,) => {
+export const getGetAccountQueryKey = (id: string,) => {
     return [
     `/api/accounts/${id}`
     ] as const;
     }
 
 
-export const getGetAccountQueryOptions = <TData = Awaited<ReturnType<typeof getAccount>>, TError = ErrorType<void>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAccount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetAccountQueryOptions = <TData = Awaited<ReturnType<typeof getAccount>>, TError = ErrorType<void>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAccount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -349,7 +349,7 @@ export type GetAccountQueryError = ErrorType<void>
  */
 
 export function useGetAccount<TData = Awaited<ReturnType<typeof getAccount>>, TError = ErrorType<void>>(
- id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAccount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAccount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
@@ -366,7 +366,7 @@ export function useGetAccount<TData = Awaited<ReturnType<typeof getAccount>>, TE
 
 
 
-export const getUpdateAccountUrl = (id: number,) => {
+export const getUpdateAccountUrl = (id: string,) => {
 
 
 
@@ -377,7 +377,7 @@ export const getUpdateAccountUrl = (id: number,) => {
 /**
  * @summary Update account
  */
-export const updateAccount = async (id: number,
+export const updateAccount = async (id: string,
     accountUpdate: AccountUpdate, options?: RequestInit): Promise<Account> => {
 
   return customFetch<Account>(getUpdateAccountUrl(id),
@@ -394,8 +394,8 @@ export const updateAccount = async (id: number,
 
 
 export const getUpdateAccountMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAccount>>, TError,{id: number;data: BodyType<AccountUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof updateAccount>>, TError,{id: number;data: BodyType<AccountUpdate>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAccount>>, TError,{id: string;data: BodyType<AccountUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateAccount>>, TError,{id: string;data: BodyType<AccountUpdate>}, TContext> => {
 
 const mutationKey = ['updateAccount'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -407,7 +407,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAccount>>, {id: number;data: BodyType<AccountUpdate>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAccount>>, {id: string;data: BodyType<AccountUpdate>}> = (props) => {
           const {id,data} = props ?? {};
 
           return  updateAccount(id,data,requestOptions)
@@ -428,17 +428,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * @summary Update account
  */
 export const useUpdateAccount = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAccount>>, TError,{id: number;data: BodyType<AccountUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAccount>>, TError,{id: string;data: BodyType<AccountUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateAccount>>,
         TError,
-        {id: number;data: BodyType<AccountUpdate>},
+        {id: string;data: BodyType<AccountUpdate>},
         TContext
       > => {
       return useMutation(getUpdateAccountMutationOptions(options));
     }
 
-export const getDeleteAccountUrl = (id: number,) => {
+export const getDeleteAccountUrl = (id: string,) => {
 
 
 
@@ -449,7 +449,7 @@ export const getDeleteAccountUrl = (id: number,) => {
 /**
  * @summary Delete account
  */
-export const deleteAccount = async (id: number, options?: RequestInit): Promise<void> => {
+export const deleteAccount = async (id: string, options?: RequestInit): Promise<void> => {
 
   return customFetch<void>(getDeleteAccountUrl(id),
   {
@@ -464,8 +464,8 @@ export const deleteAccount = async (id: number, options?: RequestInit): Promise<
 
 
 export const getDeleteAccountMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAccount>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteAccount>>, TError,{id: number}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAccount>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteAccount>>, TError,{id: string}, TContext> => {
 
 const mutationKey = ['deleteAccount'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -477,7 +477,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAccount>>, {id: number}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAccount>>, {id: string}> = (props) => {
           const {id} = props ?? {};
 
           return  deleteAccount(id,requestOptions)
@@ -498,11 +498,11 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * @summary Delete account
  */
 export const useDeleteAccount = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAccount>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAccount>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof deleteAccount>>,
         TError,
-        {id: number},
+        {id: string},
         TContext
       > => {
       return useMutation(getDeleteAccountMutationOptions(options));
@@ -1172,7 +1172,7 @@ export const useBulkAddLinks = <TError = ErrorType<unknown>,
       return useMutation(getBulkAddLinksMutationOptions(options));
     }
 
-export const getDeleteLinkUrl = (id: number,) => {
+export const getDeleteLinkUrl = (id: string,) => {
 
 
 
@@ -1183,7 +1183,7 @@ export const getDeleteLinkUrl = (id: number,) => {
 /**
  * @summary Delete a link
  */
-export const deleteLink = async (id: number, options?: RequestInit): Promise<void> => {
+export const deleteLink = async (id: string, options?: RequestInit): Promise<void> => {
 
   return customFetch<void>(getDeleteLinkUrl(id),
   {
@@ -1198,8 +1198,8 @@ export const deleteLink = async (id: number, options?: RequestInit): Promise<voi
 
 
 export const getDeleteLinkMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteLink>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteLink>>, TError,{id: number}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteLink>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteLink>>, TError,{id: string}, TContext> => {
 
 const mutationKey = ['deleteLink'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -1211,7 +1211,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteLink>>, {id: number}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteLink>>, {id: string}> = (props) => {
           const {id} = props ?? {};
 
           return  deleteLink(id,requestOptions)
@@ -1232,11 +1232,11 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * @summary Delete a link
  */
 export const useDeleteLink = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteLink>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteLink>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof deleteLink>>,
         TError,
-        {id: number},
+        {id: string},
         TContext
       > => {
       return useMutation(getDeleteLinkMutationOptions(options));
@@ -1551,7 +1551,7 @@ export const useAddCollection = <TError = ErrorType<unknown>,
       return useMutation(getAddCollectionMutationOptions(options));
     }
 
-export const getDeleteCollectionUrl = (id: number,) => {
+export const getDeleteCollectionUrl = (id: string,) => {
 
 
 
@@ -1562,7 +1562,7 @@ export const getDeleteCollectionUrl = (id: number,) => {
 /**
  * @summary Remove a collection source
  */
-export const deleteCollection = async (id: number, options?: RequestInit): Promise<void> => {
+export const deleteCollection = async (id: string, options?: RequestInit): Promise<void> => {
 
   return customFetch<void>(getDeleteCollectionUrl(id),
   {
@@ -1577,8 +1577,8 @@ export const deleteCollection = async (id: number, options?: RequestInit): Promi
 
 
 export const getDeleteCollectionMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCollection>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteCollection>>, TError,{id: number}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCollection>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteCollection>>, TError,{id: string}, TContext> => {
 
 const mutationKey = ['deleteCollection'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -1590,7 +1590,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteCollection>>, {id: number}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteCollection>>, {id: string}> = (props) => {
           const {id} = props ?? {};
 
           return  deleteCollection(id,requestOptions)
@@ -1611,17 +1611,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * @summary Remove a collection source
  */
 export const useDeleteCollection = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCollection>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCollection>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof deleteCollection>>,
         TError,
-        {id: number},
+        {id: string},
         TContext
       > => {
       return useMutation(getDeleteCollectionMutationOptions(options));
     }
 
-export const getSyncCollectionUrl = (id: number,) => {
+export const getSyncCollectionUrl = (id: string,) => {
 
 
 
@@ -1632,7 +1632,7 @@ export const getSyncCollectionUrl = (id: number,) => {
 /**
  * @summary Manually sync links from a MongoDB collection
  */
-export const syncCollection = async (id: number, options?: RequestInit): Promise<SyncResult> => {
+export const syncCollection = async (id: string, options?: RequestInit): Promise<SyncResult> => {
 
   return customFetch<SyncResult>(getSyncCollectionUrl(id),
   {
@@ -1647,8 +1647,8 @@ export const syncCollection = async (id: number, options?: RequestInit): Promise
 
 
 export const getSyncCollectionMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof syncCollection>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof syncCollection>>, TError,{id: number}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof syncCollection>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof syncCollection>>, TError,{id: string}, TContext> => {
 
 const mutationKey = ['syncCollection'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -1660,7 +1660,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof syncCollection>>, {id: number}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof syncCollection>>, {id: string}> = (props) => {
           const {id} = props ?? {};
 
           return  syncCollection(id,requestOptions)
@@ -1681,11 +1681,11 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * @summary Manually sync links from a MongoDB collection
  */
 export const useSyncCollection = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof syncCollection>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof syncCollection>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof syncCollection>>,
         TError,
-        {id: number},
+        {id: string},
         TContext
       > => {
       return useMutation(getSyncCollectionMutationOptions(options));

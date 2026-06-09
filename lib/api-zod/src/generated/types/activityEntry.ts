@@ -3,12 +3,13 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 import type { ActivityEntryType } from './activityEntryType';
 
 export interface ActivityEntry {
-  id: number;
+  /** MongoDB ObjectId string */
+  id: string;
   type: ActivityEntryType;
   message: string;
   /** @nullable */

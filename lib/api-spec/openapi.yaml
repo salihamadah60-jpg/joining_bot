@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
-  version: 0.2.0
+  version: 0.3.0
   description: Telegram Multi-Account Bot Manager API
 servers:
   - url: /api
@@ -80,7 +80,7 @@ paths:
           in: path
           required: true
           schema:
-            type: integer
+            type: string
       responses:
         "200":
           description: Account details
@@ -99,7 +99,7 @@ paths:
           in: path
           required: true
           schema:
-            type: integer
+            type: string
       requestBody:
         required: true
         content:
@@ -122,7 +122,7 @@ paths:
           in: path
           required: true
           schema:
-            type: integer
+            type: string
       responses:
         "204":
           description: Deleted
@@ -315,7 +315,7 @@ paths:
           in: path
           required: true
           schema:
-            type: integer
+            type: string
       responses:
         "204":
           description: Deleted
@@ -344,10 +344,10 @@ paths:
           schema:
             type: integer
             default: 50
-        - name: accountId
+        - name: accountPhone
           in: query
           schema:
-            type: ["integer", "null"]
+            type: ["string", "null"]
       responses:
         "200":
           description: List of jobs
@@ -400,7 +400,7 @@ paths:
           in: path
           required: true
           schema:
-            type: integer
+            type: string
       responses:
         "204":
           description: Deleted
@@ -415,7 +415,7 @@ paths:
           in: path
           required: true
           schema:
-            type: integer
+            type: string
       responses:
         "200":
           description: Sync result
@@ -542,7 +542,8 @@ components:
       required: [id, phone, status, joinedCount, failedCount, dailyLimit, currentDelay, joinedToday, channelsCount, hasSession, isPremium, createdAt]
       properties:
         id:
-          type: integer
+          type: string
+          description: MongoDB ObjectId string
         phone:
           type: string
         label:
@@ -719,7 +720,8 @@ components:
       required: [id, url, status, createdAt]
       properties:
         id:
-          type: integer
+          type: string
+          description: MongoDB ObjectId string
         url:
           type: string
         status:
@@ -734,8 +736,9 @@ components:
           enum: [group, channel, unknown, null]
         source:
           type: ["string", "null"]
-        usedByAccountId:
-          type: ["integer", "null"]
+        usedByAccountPhone:
+          type: ["string", "null"]
+          description: Phone number of the account that joined this link
         createdAt:
           type: string
         processedAt:
@@ -767,10 +770,27 @@ components:
       properties:
         added:
           type: integer
+          description: Number of new links added to TARGET_LINKS
         duplicates:
           type: integer
+          description: Number of links already in TARGET_LINKS (duplicate URL)
+        alreadyJoined:
+          type: integer
+          description: Number of links already recorded in JOINED collection
+        alreadyJoinedUrls:
+          type: array
+          items:
+            type: string
+          description: URLs that were already joined (for user feedback)
         total:
           type: integer
+          description: Total URLs extracted from input
+        extracted:
+          type: integer
+          description: Total t.me URLs extracted from raw text
+        errors:
+          type: integer
+          description: Number of insertion errors
 
     LinksStats:
       type: object
@@ -789,18 +809,15 @@ components:
 
     JoinJob:
       type: object
-      required: [id, accountId, linkId, status, createdAt]
+      required: [id, accountPhone, linkUrl, status, createdAt]
       properties:
         id:
-          type: integer
-        accountId:
-          type: integer
+          type: string
+          description: MongoDB ObjectId string
         accountPhone:
-          type: ["string", "null"]
-        linkId:
-          type: integer
+          type: string
         linkUrl:
-          type: ["string", "null"]
+          type: string
         status:
           type: string
           enum: [success, failed, skipped, flood_wait]
@@ -813,10 +830,11 @@ components:
 
     Collection:
       type: object
-      required: [id, name, connectionString, linkField, isActive, lastSyncAt, createdAt]
+      required: [id, name, connectionString, linkField, isActive, createdAt]
       properties:
         id:
-          type: integer
+          type: string
+          description: MongoDB ObjectId string
         name:
           type: string
         connectionString:
@@ -862,12 +880,10 @@ components:
 
     BotStatus:
       type: object
-      required: [running, currentAccountId, queueSize, rotationInterval, startedAt]
+      required: [running, queueSize, rotationInterval, startedAt]
       properties:
         running:
           type: boolean
-        currentAccountId:
-          type: ["integer", "null"]
         currentAccountPhone:
           type: ["string", "null"]
         queueSize:
@@ -887,10 +903,11 @@ components:
       required: [id, type, message, createdAt]
       properties:
         id:
-          type: integer
+          type: string
+          description: MongoDB ObjectId string
         type:
           type: string
-          enum: [join_success, join_failed, join_skipped, flood_wait, account_switched, bot_started, bot_stopped, sync_completed]
+          enum: [join_success, join_failed, join_skipped, flood_wait, account_switched, bot_started, bot_stopped, sync_completed, channel_detected]
         message:
           type: string
         accountPhone:

@@ -45,7 +45,7 @@ export default function Jobs() {
                   <TableCell className="text-muted-foreground whitespace-nowrap">
                     {format(new Date(job.createdAt), "yyyy-MM-dd HH:mm:ss")}
                   </TableCell>
-                  <TableCell className="font-medium text-primary">{job.accountPhone || `ID:${job.accountId}`}</TableCell>
+                  <TableCell className="font-medium text-primary">{job.accountPhone || '—'}</TableCell>
                   <TableCell className="truncate max-w-[200px]" title={job.linkUrl || ''}>{job.linkUrl || '-'}</TableCell>
                   <TableCell>{getStatusBadge(job.status)}</TableCell>
                   <TableCell className="text-muted-foreground">

@@ -3,11 +3,22 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 
 export interface BulkAddResult {
+  /** Number of new links added to TARGET_LINKS */
   added: number;
+  /** Number of links already in TARGET_LINKS (duplicate URL) */
   duplicates: number;
+  /** Number of links already recorded in JOINED collection */
+  alreadyJoined?: number;
+  /** URLs that were already joined (for user feedback) */
+  alreadyJoinedUrls?: string[];
+  /** Total URLs extracted from input */
   total: number;
+  /** Total t.me URLs extracted from raw text */
+  extracted?: number;
+  /** Number of insertion errors */
+  errors?: number;
 }

@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useListLinks, useBulkAddLinks, useDeleteLink } from "@workspace/api-client-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Link as LinkIcon, Plus, Trash2, Filter, RotateCcw } from "lucide-react";
+import { Link as LinkIcon, Plus, Trash2, Filter, RotateCcw, CheckCircle2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -28,21 +28,39 @@ export default function Links() {
 
   const [isBulkOpen, setIsBulkOpen] = useState(false);
   const [bulkUrls, setBulkUrls] = useState("");
+  const [joinedFeedback, setJoinedFeedback] = useState<string[]>([]);
+  const [isJoinedDialogOpen, setIsJoinedDialogOpen] = useState(false);
 
   const handleBulkAdd = () => {
     if (!bulkUrls.trim()) return;
 
-    // Send raw text — server will extract & deduplicate all t.me URLs automatically
     bulkAddLinks.mutate({ data: { urls: [bulkUrls] } }, {
       onSuccess: (data: any) => {
         queryClient.invalidateQueries({ queryKey: ["/api/links"] });
         setIsBulkOpen(false);
         setBulkUrls("");
+
         const extracted = data.extracted ?? data.total ?? 0;
+        const alreadyJoined = data.alreadyJoined ?? 0;
+        const alreadyJoinedUrls: string[] = data.alreadyJoinedUrls ?? [];
+
+        let description = `${extracted} رابط استُخرج — ${data.added} جديد — ${data.duplicates ?? 0} مكرر`;
+        if (alreadyJoined > 0) {
+          description += ` — ${alreadyJoined} تم الانضمام سابقاً`;
+        }
+        if (data.errors) {
+          description += ` — ${data.errors} خطأ`;
+        }
+
         toast({
-          title: `✅ تم إضافة ${data.added} رابط`,
-          description: `${extracted} رابط استُخرج — ${data.duplicates} مكرر تجاهَل — ${data.errors ?? 0} خطأ`,
+          title: `✅ تمت المعالجة`,
+          description,
         });
+
+        if (alreadyJoinedUrls.length > 0) {
+          setJoinedFeedback(alreadyJoinedUrls);
+          setIsJoinedDialogOpen(true);
+        }
       },
       onError: () => {
         toast({ title: "خطأ", description: "فشل إضافة الروابط", variant: "destructive" });
@@ -51,7 +69,7 @@ export default function Links() {
   };
 
   const retryLink = useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async (id: string) => {
       const res = await fetch(`/api/links/${id}/retry`, { method: "POST" });
       if (!res.ok) throw new Error("فشلت إعادة المحاولة");
       return res.json();
@@ -65,11 +83,11 @@ export default function Links() {
     },
   });
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     deleteLink.mutate({ id }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: ["/api/links"] });
-        toast({ title: "Link Deleted" });
+        toast({ title: "تم الحذف" });
       }
     });
   };
@@ -134,6 +152,29 @@ export default function Links() {
           </Dialog>
         </div>
       </div>
+
+      {/* Already-joined feedback dialog */}
+      <Dialog open={isJoinedDialogOpen} onOpenChange={setIsJoinedDialogOpen}>
+        <DialogContent className="border-card-border bg-card max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="font-mono flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-primary" />
+              ALREADY_JOINED ({joinedFeedback.length})
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground mb-2">
+            هذه الروابط موجودة مسبقاً في سجل JOINED — تم الانضمام إليها من قبل:
+          </p>
+          <div className="max-h-[300px] overflow-y-auto rounded border border-card-border bg-background p-3 space-y-1 font-mono text-xs">
+            {joinedFeedback.map((url) => (
+              <div key={url} className="text-muted-foreground truncate">{url}</div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsJoinedDialogOpen(false)} className="font-mono">إغلاق</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Card className="border-card-border">
         <CardContent className="p-0">

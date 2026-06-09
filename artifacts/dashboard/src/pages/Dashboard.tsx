@@ -9,16 +9,16 @@ import { format } from "date-fns";
 export default function Dashboard() {
   const queryClient = useQueryClient();
   const { data: botStatus, isLoading: loadingStatus } = useGetBotStatus({
-    query: { refetchInterval: 5000 }
+    query: { refetchInterval: 5000 } as any
   });
   const { data: activity, isLoading: loadingActivity } = useGetBotActivity({
-    query: { refetchInterval: 5000 }
+    query: { refetchInterval: 5000 } as any
   });
   const { data: accountsStats } = useGetAccountsStats({
-    query: { refetchInterval: 5000 }
+    query: { refetchInterval: 5000 } as any
   });
   const { data: linksStats } = useGetLinksStats({
-    query: { refetchInterval: 5000 }
+    query: { refetchInterval: 5000 } as any
   });
 
   const startBot = useStartBot();

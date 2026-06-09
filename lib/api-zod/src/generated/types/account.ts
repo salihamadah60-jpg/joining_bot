@@ -3,12 +3,13 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 import type { AccountStatus } from './accountStatus';
 
 export interface Account {
-  id: number;
+  /** MongoDB ObjectId string */
+  id: string;
   phone: string;
   /** @nullable */
   label?: string | null;

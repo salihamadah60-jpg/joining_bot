@@ -32,7 +32,7 @@ function run(cmd: string): string {
 
 function getRepoUrl(): string {
   const current = run("git remote get-url origin 2>/dev/null");
-  if (current && !current.includes("github_pat") && !current.includes(TOKEN)) {
+  if (current && !current.includes("github_pat") && !current.includes(TOKEN!)) {
     // inject token into url
     return current.replace("https://", `https://${TOKEN}@`);
   }

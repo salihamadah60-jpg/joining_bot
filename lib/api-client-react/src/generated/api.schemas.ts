@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 export interface HealthStatus {
   status: string;
@@ -22,7 +22,8 @@ export const AccountStatus = {
 } as const;
 
 export interface Account {
-  id: number;
+  /** MongoDB ObjectId string */
+  id: string;
   phone: string;
   /** @nullable */
   label?: string | null;
@@ -167,7 +168,8 @@ export const GroupLinkGroupType = {
 } as const;
 
 export interface GroupLink {
-  id: number;
+  /** MongoDB ObjectId string */
+  id: string;
   url: string;
   status: GroupLinkStatus;
   /** @nullable */
@@ -178,8 +180,11 @@ export interface GroupLink {
   groupType?: GroupLinkGroupType;
   /** @nullable */
   source?: string | null;
-  /** @nullable */
-  usedByAccountId?: number | null;
+  /**
+     * Phone number of the account that joined this link
+     * @nullable
+     */
+  usedByAccountPhone?: string | null;
   createdAt: string;
   /** @nullable */
   processedAt?: string | null;
@@ -196,9 +201,20 @@ export interface BulkLinksInput {
 }
 
 export interface BulkAddResult {
+  /** Number of new links added to TARGET_LINKS */
   added: number;
+  /** Number of links already in TARGET_LINKS (duplicate URL) */
   duplicates: number;
+  /** Number of links already recorded in JOINED collection */
+  alreadyJoined?: number;
+  /** URLs that were already joined (for user feedback) */
+  alreadyJoinedUrls?: string[];
+  /** Total URLs extracted from input */
   total: number;
+  /** Total t.me URLs extracted from raw text */
+  extracted?: number;
+  /** Number of insertion errors */
+  errors?: number;
 }
 
 export interface LinksStats {
@@ -220,13 +236,10 @@ export const JoinJobStatus = {
 } as const;
 
 export interface JoinJob {
-  id: number;
-  accountId: number;
-  /** @nullable */
-  accountPhone?: string | null;
-  linkId: number;
-  /** @nullable */
-  linkUrl?: string | null;
+  /** MongoDB ObjectId string */
+  id: string;
+  accountPhone: string;
+  linkUrl: string;
   status: JoinJobStatus;
   /** @nullable */
   errorCode?: string | null;
@@ -236,14 +249,15 @@ export interface JoinJob {
 }
 
 export interface Collection {
-  id: number;
+  /** MongoDB ObjectId string */
+  id: string;
   name: string;
   connectionString: string;
   dbName?: string;
   linkField: string;
   isActive: boolean;
   /** @nullable */
-  lastSyncAt: string | null;
+  lastSyncAt?: string | null;
   syncedCount?: number;
   createdAt: string;
 }
@@ -264,8 +278,6 @@ export interface SyncResult {
 
 export interface BotStatus {
   running: boolean;
-  /** @nullable */
-  currentAccountId: number | null;
   /** @nullable */
   currentAccountPhone?: string | null;
   queueSize: number;
@@ -289,10 +301,12 @@ export const ActivityEntryType = {
   bot_started: 'bot_started',
   bot_stopped: 'bot_stopped',
   sync_completed: 'sync_completed',
+  channel_detected: 'channel_detected',
 } as const;
 
 export interface ActivityEntry {
-  id: number;
+  /** MongoDB ObjectId string */
+  id: string;
   type: ActivityEntryType;
   message: string;
   /** @nullable */
@@ -353,7 +367,7 @@ limit?: number;
 /**
  * @nullable
  */
-accountId?: number | null;
+accountPhone?: string | null;
 };
 
 export type UpdateSettings200 = {

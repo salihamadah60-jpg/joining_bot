@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 import * as zod from 'zod';
 
@@ -20,7 +20,7 @@ export const HealthCheckResponse = zod.object({
  * @summary List all Telegram accounts
  */
 export const ListAccountsResponseItem = zod.object({
-  "id": zod.number(),
+  "id": zod.string().describe('MongoDB ObjectId string'),
   "phone": zod.string(),
   "label": zod.string().nullish(),
   "status": zod.enum(['active', 'paused', 'banned', 'flood_wait', 'channels_limit', 'needs_auth']),
@@ -54,11 +54,11 @@ export const CreateAccountBody = zod.object({
  * @summary Get account by ID
  */
 export const GetAccountParams = zod.object({
-  "id": zod.coerce.number()
+  "id": zod.coerce.string()
 })
 
 export const GetAccountResponse = zod.object({
-  "id": zod.number(),
+  "id": zod.string().describe('MongoDB ObjectId string'),
   "phone": zod.string(),
   "label": zod.string().nullish(),
   "status": zod.enum(['active', 'paused', 'banned', 'flood_wait', 'channels_limit', 'needs_auth']),
@@ -80,7 +80,7 @@ export const GetAccountResponse = zod.object({
  * @summary Update account
  */
 export const UpdateAccountParams = zod.object({
-  "id": zod.coerce.number()
+  "id": zod.coerce.string()
 })
 
 export const UpdateAccountBody = zod.object({
@@ -91,7 +91,7 @@ export const UpdateAccountBody = zod.object({
 })
 
 export const UpdateAccountResponse = zod.object({
-  "id": zod.number(),
+  "id": zod.string().describe('MongoDB ObjectId string'),
   "phone": zod.string(),
   "label": zod.string().nullish(),
   "status": zod.enum(['active', 'paused', 'banned', 'flood_wait', 'channels_limit', 'needs_auth']),
@@ -113,7 +113,7 @@ export const UpdateAccountResponse = zod.object({
  * @summary Delete account
  */
 export const DeleteAccountParams = zod.object({
-  "id": zod.coerce.number()
+  "id": zod.coerce.string()
 })
 
 
@@ -218,14 +218,14 @@ export const ListLinksQueryParams = zod.object({
 })
 
 export const ListLinksResponseItem = zod.object({
-  "id": zod.number(),
+  "id": zod.string().describe('MongoDB ObjectId string'),
   "url": zod.string(),
   "status": zod.enum(['pending', 'joined', 'failed', 'skipped']),
   "failReason": zod.string().nullish(),
   "groupTitle": zod.string().nullish(),
   "groupType": zod.union([zod.literal('group'),zod.literal('channel'),zod.literal('unknown'),zod.literal(null)]).nullish(),
   "source": zod.string().nullish(),
-  "usedByAccountId": zod.number().nullish(),
+  "usedByAccountPhone": zod.string().nullish().describe('Phone number of the account that joined this link'),
   "createdAt": zod.string(),
   "processedAt": zod.string().nullish()
 })
@@ -254,7 +254,7 @@ export const BulkAddLinksBody = zod.object({
  * @summary Delete a link
  */
 export const DeleteLinkParams = zod.object({
-  "id": zod.coerce.number()
+  "id": zod.coerce.string()
 })
 
 
@@ -277,15 +277,13 @@ export const listJobsQueryLimitDefault = 50;
 
 export const ListJobsQueryParams = zod.object({
   "limit": zod.coerce.number().default(listJobsQueryLimitDefault),
-  "accountId": zod.coerce.number().nullish()
+  "accountPhone": zod.coerce.string().nullish()
 })
 
 export const ListJobsResponseItem = zod.object({
-  "id": zod.number(),
-  "accountId": zod.number(),
-  "accountPhone": zod.string().nullish(),
-  "linkId": zod.number(),
-  "linkUrl": zod.string().nullish(),
+  "id": zod.string().describe('MongoDB ObjectId string'),
+  "accountPhone": zod.string(),
+  "linkUrl": zod.string(),
   "status": zod.enum(['success', 'failed', 'skipped', 'flood_wait']),
   "errorCode": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
@@ -298,13 +296,13 @@ export const ListJobsResponse = zod.array(ListJobsResponseItem)
  * @summary List all MongoDB collections configured as link sources
  */
 export const ListCollectionsResponseItem = zod.object({
-  "id": zod.number(),
+  "id": zod.string().describe('MongoDB ObjectId string'),
   "name": zod.string(),
   "connectionString": zod.string(),
   "dbName": zod.string().optional(),
   "linkField": zod.string(),
   "isActive": zod.boolean(),
-  "lastSyncAt": zod.string().nullable(),
+  "lastSyncAt": zod.string().nullish(),
   "syncedCount": zod.number().optional(),
   "createdAt": zod.string()
 })
@@ -327,7 +325,7 @@ export const AddCollectionBody = zod.object({
  * @summary Remove a collection source
  */
 export const DeleteCollectionParams = zod.object({
-  "id": zod.coerce.number()
+  "id": zod.coerce.string()
 })
 
 
@@ -335,7 +333,7 @@ export const DeleteCollectionParams = zod.object({
  * @summary Manually sync links from a MongoDB collection
  */
 export const SyncCollectionParams = zod.object({
-  "id": zod.coerce.number()
+  "id": zod.coerce.string()
 })
 
 export const SyncCollectionResponse = zod.object({
@@ -375,7 +373,6 @@ export const GetTelegramStatusResponse = zod.object({
  */
 export const GetBotStatusResponse = zod.object({
   "running": zod.boolean(),
-  "currentAccountId": zod.number().nullable(),
   "currentAccountPhone": zod.string().nullish(),
   "queueSize": zod.number(),
   "rotationInterval": zod.number().describe('Safe per-account join interval in seconds (~1029s \/ 17.2 min)'),
@@ -390,7 +387,6 @@ export const GetBotStatusResponse = zod.object({
  */
 export const StartBotResponse = zod.object({
   "running": zod.boolean(),
-  "currentAccountId": zod.number().nullable(),
   "currentAccountPhone": zod.string().nullish(),
   "queueSize": zod.number(),
   "rotationInterval": zod.number().describe('Safe per-account join interval in seconds (~1029s \/ 17.2 min)'),
@@ -405,7 +401,6 @@ export const StartBotResponse = zod.object({
  */
 export const StopBotResponse = zod.object({
   "running": zod.boolean(),
-  "currentAccountId": zod.number().nullable(),
   "currentAccountPhone": zod.string().nullish(),
   "queueSize": zod.number(),
   "rotationInterval": zod.number().describe('Safe per-account join interval in seconds (~1029s \/ 17.2 min)'),
@@ -419,8 +414,8 @@ export const StopBotResponse = zod.object({
  * @summary Get recent bot activity feed
  */
 export const GetBotActivityResponseItem = zod.object({
-  "id": zod.number(),
-  "type": zod.enum(['join_success', 'join_failed', 'join_skipped', 'flood_wait', 'account_switched', 'bot_started', 'bot_stopped', 'sync_completed']),
+  "id": zod.string().describe('MongoDB ObjectId string'),
+  "type": zod.enum(['join_success', 'join_failed', 'join_skipped', 'flood_wait', 'account_switched', 'bot_started', 'bot_stopped', 'sync_completed', 'channel_detected']),
   "message": zod.string(),
   "accountPhone": zod.string().nullish(),
   "linkUrl": zod.string().nullish(),

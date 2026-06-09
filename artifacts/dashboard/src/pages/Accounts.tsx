@@ -263,7 +263,7 @@ export default function Accounts() {
     queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
   };
 
-  const handleToggleStatus = (id: number, currentStatus: string) => {
+  const handleToggleStatus = (id: string, currentStatus: string) => {
     const newStatus = currentStatus === "paused" ? "active" : "paused";
     updateAccount.mutate(
       { id, data: { status: newStatus as any } },
@@ -276,7 +276,7 @@ export default function Accounts() {
     );
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     if (confirm("هل أنت متأكد من حذف هذا الحساب؟")) {
       deleteAccount.mutate(
         { id },
@@ -307,10 +307,10 @@ export default function Accounts() {
     );
   };
 
-  const [syncingId, setSyncingId] = useState<number | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
 
   const syncDialogs = useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async (id: string) => {
       const r = await fetch(`/api/accounts/${id}/sync-dialogs`, { method: "POST" });
       if (!r.ok) throw new Error(await r.text());
       return r.json();

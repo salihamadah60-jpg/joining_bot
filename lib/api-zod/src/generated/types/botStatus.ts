@@ -3,13 +3,11 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 
 export interface BotStatus {
   running: boolean;
-  /** @nullable */
-  currentAccountId: number | null;
   /** @nullable */
   currentAccountPhone?: string | null;
   queueSize: number;

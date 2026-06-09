@@ -3,18 +3,15 @@
  * Do not edit manually.
  * Api
  * Telegram Multi-Account Bot Manager API
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 import type { JoinJobStatus } from './joinJobStatus';
 
 export interface JoinJob {
-  id: number;
-  accountId: number;
-  /** @nullable */
-  accountPhone?: string | null;
-  linkId: number;
-  /** @nullable */
-  linkUrl?: string | null;
+  /** MongoDB ObjectId string */
+  id: string;
+  accountPhone: string;
+  linkUrl: string;
   status: JoinJobStatus;
   /** @nullable */
   errorCode?: string | null;
