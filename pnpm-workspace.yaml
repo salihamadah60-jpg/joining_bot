@@ -52,7 +52,6 @@ catalog:
   '@vitejs/plugin-react': ^5.0.4
   class-variance-authority: ^0.7.1
   clsx: ^2.1.1
-  drizzle-orm: ^0.45.2
   framer-motion: ^12.23.24
   lucide-react: ^0.545.0
   # Must be this exact version because expo requires it
@@ -70,7 +69,6 @@ autoInstallPeers: false
 
 onlyBuiltDependencies:
   - '@swc/core'
-  - better-sqlite3
   - esbuild
   - msw
   - unrs-resolver
@@ -159,9 +157,3 @@ overrides:
   # drizzle-kit uses esbuild internally on an older version that's vulnerable, this overrides it
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
   esbuild: "0.27.3"
-  # Prevent better-sqlite3 from being resolved as a peer of drizzle-orm.
-  # @mtcute/node uses better-sqlite3 for its own SQLite session storage;
-  # drizzle-orm in this project uses pg only. Without this override pnpm
-  # creates two separate drizzle-orm instances (with/without better-sqlite3)
-  # whose private TypeScript types become incompatible.
-  "drizzle-orm>better-sqlite3": "-"

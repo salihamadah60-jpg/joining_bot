@@ -12,12 +12,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "mongodb": "^7.2.0",
-    "pg": "^8.16.0"
+    "mongodb": "^7.2.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@types/pg": "^8.11.14",
     "tsx": "catalog:"
   }
 }

@@ -1,73 +1,19 @@
 import { Router, type IRouter } from "express";
-import { eq, sql } from "drizzle-orm";
-import { db, groupLinksTable } from "@workspace/db";
-import {
-  ListLinksQueryParams,
-  ListLinksResponse,
-  AddLinkBody,
-  BulkAddLinksBody,
-  DeleteLinkParams,
-  GetLinksStatsResponse,
-} from "@workspace/api-zod";
+import { ObjectId } from "mongodb";
+import { collections } from "@workspace/db";
 
 const router: IRouter = Router();
 
-router.get("/links/stats", async (req, res): Promise<void> => {
-  const links = await db.select().from(groupLinksTable);
-  const stats = {
-    total: links.length,
-    pending: links.filter((l) => l.status === "pending").length,
-    joined: links.filter((l) => l.status === "joined").length,
-    failed: links.filter((l) => l.status === "failed").length,
-    skipped: links.filter((l) => l.status === "skipped").length,
-  };
-  res.json(GetLinksStatsResponse.parse(stats));
-});
-
-router.get("/links", async (req, res): Promise<void> => {
-  const params = ListLinksQueryParams.safeParse(req.query);
-  let query = db.select().from(groupLinksTable);
-  const filters = [];
-  if (params.success && params.data.status) {
-    filters.push(eq(groupLinksTable.status, params.data.status));
-  }
-  if (params.success && params.data.source) {
-    filters.push(eq(groupLinksTable.source, params.data.source));
-  }
-  let links;
-  if (filters.length === 1) {
-    links = await db.select().from(groupLinksTable).where(filters[0]).orderBy(groupLinksTable.createdAt);
-  } else {
-    links = await db.select().from(groupLinksTable).orderBy(groupLinksTable.createdAt);
-  }
-  res.json(ListLinksResponse.parse(links.map(serializeLink)));
-});
-
-router.post("/links", async (req, res): Promise<void> => {
-  const parsed = AddLinkBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-  try {
-    const [link] = await db.insert(groupLinksTable).values({ url: parsed.data.url, source: parsed.data.source ?? null }).returning();
-    res.status(201).json(serializeLink(link));
-  } catch (e: any) {
-    if (e.code === "23505") { res.status(409).json({ error: "Link already exists" }); return; }
-    throw e;
-  }
-});
-
-/** Extract all valid Telegram URLs from a raw text blob (mixed text + links). */
+/** Extract all valid Telegram URLs from a raw text blob. */
 function extractTelegramUrls(rawText: string): string[] {
-  // Match: https://t.me/..., t.me/..., @username
   const pattern = /(?:https?:\/\/t\.me\/[^\s"'<>\u0600-\u06FF]+|t\.me\/[^\s"'<>\u0600-\u06FF]+|@[a-zA-Z][a-zA-Z0-9_]{3,})/gi;
   const matches = rawText.match(pattern) ?? [];
-  // Normalise: ensure https:// prefix, strip trailing punctuation
   const normalised = matches.map((u) => {
     let url = u.trim().replace(/[,;.،؛]+$/, "");
     if (url.startsWith("@")) return `https://t.me/${url.slice(1)}`;
     if (!url.startsWith("http")) return `https://${url}`;
     return url;
   });
-  // Deduplicate (case-insensitive)
   const seen = new Set<string>();
   return normalised.filter((u) => {
     const key = u.toLowerCase();
@@ -77,66 +23,161 @@ function extractTelegramUrls(rawText: string): string[] {
   });
 }
 
+function serializeLink(l: any) {
+  return {
+    id: l._id.toString(),
+    url: l.url,
+    status: l.status,
+    failReason: l.failReason ?? null,
+    groupTitle: l.groupTitle ?? null,
+    groupType: l.groupType ?? null,
+    source: l.source ?? null,
+    usedByAccountPhone: l.usedByAccountPhone ?? null,
+    retryCount: l.retryCount ?? 0,
+    retryAfter: l.retryAfter ? new Date(l.retryAfter).toISOString() : null,
+    createdAt: l.createdAt ? new Date(l.createdAt).toISOString() : new Date().toISOString(),
+    processedAt: l.processedAt ? new Date(l.processedAt).toISOString() : null,
+  };
+}
+
+router.get("/links/stats", async (req, res): Promise<void> => {
+  const col = await collections.targetLinks();
+  const links = await col.find({}).toArray();
+  res.json({
+    total: links.length,
+    pending: links.filter((l) => l.status === "pending").length,
+    joined: links.filter((l) => l.status === "joined").length,
+    failed: links.filter((l) => l.status === "failed").length,
+    skipped: links.filter((l) => l.status === "skipped").length,
+  });
+});
+
+router.get("/links", async (req, res): Promise<void> => {
+  const col = await collections.targetLinks();
+  const filter: Record<string, any> = {};
+  if (req.query["status"]) filter["status"] = req.query["status"];
+  if (req.query["source"]) filter["source"] = req.query["source"];
+  const links = await col.find(filter).sort({ createdAt: 1 }).toArray();
+  res.json(links.map(serializeLink));
+});
+
+router.post("/links", async (req, res): Promise<void> => {
+  const body = req.body as { url?: string; source?: string };
+  if (!body?.url || typeof body.url !== "string") {
+    res.status(400).json({ error: "url is required" });
+    return;
+  }
+  const col = await collections.targetLinks();
+  try {
+    const result = await col.insertOne({
+      _id: new ObjectId(),
+      url: body.url,
+      status: "pending",
+      failReason: null,
+      groupTitle: null,
+      groupType: null,
+      source: body.source ?? null,
+      usedByAccountPhone: null,
+      retryCount: 0,
+      retryAfter: null,
+      createdAt: new Date(),
+      processedAt: null,
+    });
+    const link = await col.findOne({ _id: result.insertedId });
+    res.status(201).json(serializeLink(link));
+  } catch (e: any) {
+    if (e.code === 11000) { res.status(409).json({ error: "Link already exists" }); return; }
+    throw e;
+  }
+});
+
 router.post("/links/bulk", async (req, res): Promise<void> => {
-  // Accept either { urls: string[] } or { rawText: string } or plain text body
   let rawUrls: string[] = [];
   const body = req.body as any;
 
   if (body?.rawText && typeof body.rawText === "string") {
-    // Extract URLs from mixed text
     rawUrls = extractTelegramUrls(body.rawText);
-  } else {
-    const parsed = BulkAddLinksBody.safeParse(body);
-    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-    // Each entry in urls may itself be a mixed-text line — re-extract to be safe
-    const allText = parsed.data.urls.join("\n");
+  } else if (Array.isArray(body?.urls)) {
+    const allText = body.urls.join("\n");
     rawUrls = extractTelegramUrls(allText);
-    // If no telegram URLs found, use the original list as-is (non-telegram links)
-    if (rawUrls.length === 0) rawUrls = parsed.data.urls;
+    if (rawUrls.length === 0) rawUrls = body.urls;
+  } else {
+    res.status(400).json({ error: "Body must have urls[] or rawText" });
+    return;
   }
 
   const source = body?.source ?? null;
+  const col = await collections.targetLinks();
+  const joinedCol = await collections.joined();
+
   let added = 0;
   let duplicates = 0;
+  let alreadyJoined = 0;
   let errors = 0;
 
+  const alreadyJoinedUrls: { url: string; accountPhone: string }[] = [];
+
   for (const url of rawUrls) {
+    // Check JOINED collection first
+    const joinedDoc = await joinedCol.findOne({ url });
+    if (joinedDoc) {
+      alreadyJoined++;
+      alreadyJoinedUrls.push({ url, accountPhone: joinedDoc.accountPhone });
+      continue;
+    }
+
     try {
-      await db.insert(groupLinksTable).values({ url, source });
+      await col.insertOne({
+        _id: new ObjectId(),
+        url,
+        status: "pending",
+        failReason: null,
+        groupTitle: null,
+        groupType: null,
+        source,
+        usedByAccountPhone: null,
+        retryCount: 0,
+        retryAfter: null,
+        createdAt: new Date(),
+        processedAt: null,
+      });
       added++;
     } catch (e: any) {
-      if (e.code === "23505") { duplicates++; } else { errors++; }
+      if (e.code === 11000) { duplicates++; } else { errors++; }
     }
   }
-  res.status(201).json({ added, duplicates, errors, total: rawUrls.length, extracted: rawUrls.length });
+
+  res.status(201).json({
+    added,
+    duplicates,
+    alreadyJoined,
+    alreadyJoinedUrls,
+    errors,
+    total: rawUrls.length,
+    extracted: rawUrls.length,
+  });
 });
 
 router.post("/links/:id/retry", async (req, res): Promise<void> => {
-  const id = Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
-  if (!id || isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
-  const [updated] = await db
-    .update(groupLinksTable)
-    .set({ status: "pending", retryAfter: null, failReason: null })
-    .where(eq(groupLinksTable.id, id))
-    .returning();
-  if (!updated) { res.status(404).json({ error: "Link not found" }); return; }
-  res.json(serializeLink(updated));
+  const id = req.params["id"];
+  if (!id || !ObjectId.isValid(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const col = await collections.targetLinks();
+  const result = await col.findOneAndUpdate(
+    { _id: new ObjectId(id) },
+    { $set: { status: "pending", retryAfter: null, failReason: null } },
+    { returnDocument: "after" }
+  );
+  if (!result) { res.status(404).json({ error: "Link not found" }); return; }
+  res.json(serializeLink(result));
 });
 
 router.delete("/links/:id", async (req, res): Promise<void> => {
-  const params = DeleteLinkParams.safeParse({ id: Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) });
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
-  const [deleted] = await db.delete(groupLinksTable).where(eq(groupLinksTable.id, params.data.id)).returning();
-  if (!deleted) { res.status(404).json({ error: "Link not found" }); return; }
+  const id = req.params["id"];
+  if (!id || !ObjectId.isValid(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const col = await collections.targetLinks();
+  const result = await col.deleteOne({ _id: new ObjectId(id) });
+  if (result.deletedCount === 0) { res.status(404).json({ error: "Link not found" }); return; }
   res.sendStatus(204);
 });
-
-function serializeLink(l: typeof groupLinksTable.$inferSelect) {
-  return {
-    ...l,
-    createdAt: l.createdAt.toISOString(),
-    processedAt: l.processedAt ? l.processedAt.toISOString() : null,
-  };
-}
 
 export default router;

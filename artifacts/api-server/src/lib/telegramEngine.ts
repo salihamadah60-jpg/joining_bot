@@ -1,33 +1,21 @@
 /**
- * BOT ENGINE — CORE SCHEDULER
+ * BOT ENGINE — CORE SCHEDULER (MongoDB version)
  *
- * The engine is a singleton that:
- *  1. Reads bot state from DB to decide if running
- *  2. Schedules join actions with safe account-count-aware intervals
- *  3. Rotates accounts in a round-robin queue
- *  4. Handles ALL Telegram errors gracefully
- *  5. Enforces daily limits and blackout hours (2–8 AM)
- *  6. Logs every action to activity_log AND join_jobs
- *  7. Detects channels → saves to channel_links, does not join them
- *  8. Retries unknown errors up to MAX_RETRIES before permanently failing
- *
- * TIMING SAFETY (see timing.ts):
- *  Target: 80–90 joins / account / 18 active hours
- *  ≈ 1 join every 17.2 min per account (with 35% safety buffer + ±25% jitter)
+ * Uses MongoDB exclusively. No PostgreSQL/Drizzle.
+ * Key additions vs old version:
+ *   - Checks JOINED collection before every join attempt (dedup across restarts)
+ *   - On success: inserts into JOINED collection
+ *   - Channels: inserts into Channels collection
  */
 
-import { eq, and, lt, lte, asc, isNotNull } from "drizzle-orm";
+import { ObjectId } from "mongodb";
 import {
-  db,
-  botStateTable,
-  accountsTable,
-  groupLinksTable,
-  activityLogTable,
-  joinJobsTable,
-  channelLinksTable,
-  settingsTable,
+  collections,
+  getBotState,
+  setBotState,
+  getSettings,
 } from "@workspace/db";
-import type { Account } from "@workspace/db";
+import type { AccountDoc, TargetLinkDoc } from "@workspace/db";
 import { logger } from "./logger.js";
 import {
   computeActionIntervalMs,
@@ -44,21 +32,17 @@ import { getDeviceProfileForPhone } from "./deviceProfiles.js";
 import { eventBus } from "./eventBus.js";
 
 const MAX_RETRY_COUNT = 3;
-const RETRY_DELAY_MS = 60 * 60 * 1000; // 1 hour between retries
+const RETRY_DELAY_MS = 60 * 60 * 1000;
 
 let timer: NodeJS.Timeout | null = null;
 let engineRunning = false;
 let accountIndex = 0;
 
-// ─── Public API ─────────────────────────────────────────────────────────────────
+// ─── Public API ──────────────────────────────────────────────────────────────
 
-/**
- * Called once when the API server starts.
- * If the bot was running before a restart, it resumes automatically.
- */
 export async function engineInit(): Promise<void> {
-  const [state] = await db.select().from(botStateTable).limit(1);
-  if (state?.running) {
+  const state = await getBotState();
+  if (state.running) {
     logger.info("Bot was running before restart — resuming engine");
     engineRunning = true;
     scheduleNext(3000);
@@ -79,10 +63,7 @@ export async function engineStart(): Promise<void> {
 
 export async function engineStop(): Promise<void> {
   engineRunning = false;
-  if (timer) {
-    clearTimeout(timer);
-    timer = null;
-  }
+  if (timer) { clearTimeout(timer); timer = null; }
   logger.info("Bot engine stopped");
   eventBus.publish({
     type: "engine_stopped",
@@ -95,7 +76,7 @@ export function engineIsRunning(): boolean {
   return engineRunning;
 }
 
-// ─── Scheduler ──────────────────────────────────────────────────────────────────
+// ─── Scheduler ───────────────────────────────────────────────────────────────
 
 function scheduleNext(delayMs: number): void {
   if (timer) clearTimeout(timer);
@@ -111,16 +92,11 @@ async function tick(): Promise<void> {
   if (!engineRunning) return;
 
   try {
-    const [state] = await db.select().from(botStateTable).limit(1);
-    if (!state?.running) {
-      engineRunning = false;
-      return;
-    }
+    const state = await getBotState();
+    if (!state.running) { engineRunning = false; return; }
 
     // ── Configurable sleep schedule ──
-    const settingsRows = await db.select().from(settingsTable);
-    const settingsKv: Record<string, string> = {};
-    for (const r of settingsRows) settingsKv[r.key] = r.value;
+    const settingsKv = await getSettings();
     const activeStartHour = Number(settingsKv["active_start_hour"] ?? 8);
 
     const { setAiFilterEnabled } = await import("./aiFilter.js");
@@ -138,40 +114,29 @@ async function tick(): Promise<void> {
     }
 
     const now = new Date();
+    const accountsCol = await collections.accounts();
 
     // ── Auto-reset expired flood_wait accounts ──
-    await db
-      .update(accountsTable)
-      .set({ status: "active", floodWaitUntil: null })
-      .where(
-        and(
-          eq(accountsTable.status, "flood_wait"),
-          lte(accountsTable.floodWaitUntil, now)
-        )
-      );
+    await accountsCol.updateMany(
+      { status: "flood_wait", floodWaitUntil: { $lte: now } },
+      { $set: { status: "active", floodWaitUntil: null, updatedAt: now } }
+    );
 
-    // ── Get active accounts (ORDER BY id for stable round-robin) ──
-    const allActive = await db
-      .select()
-      .from(accountsTable)
-      .where(eq(accountsTable.status, "active"))
-      .orderBy(asc(accountsTable.id));
+    // ── Get active accounts (sort by _id for stable round-robin) ──
+    const allActive = await accountsCol.find({ status: "active" }).sort({ _id: 1 }).toArray();
 
     for (const acc of allActive) {
       if (shouldResetDailyCounter(acc.dailyResetAt)) {
-        await db
-          .update(accountsTable)
-          .set({ joinedToday: 0, dailyResetAt: now })
-          .where(eq(accountsTable.id, acc.id));
+        await accountsCol.updateOne(
+          { _id: acc._id },
+          { $set: { joinedToday: 0, dailyResetAt: now, updatedAt: now } }
+        );
         acc.joinedToday = 0;
         acc.dailyResetAt = now;
       }
     }
 
-    const usable = allActive.filter((acc) => {
-      if (acc.joinedToday >= acc.dailyLimit) return false;
-      return true;
-    });
+    const usable = allActive.filter((acc) => (acc.joinedToday ?? 0) < (acc.dailyLimit ?? DAILY_LIMIT));
 
     if (usable.length === 0) {
       scheduleNext(5 * 60_000);
@@ -181,42 +146,24 @@ async function tick(): Promise<void> {
     const intervalMs = computeActionIntervalMs(usable.length);
     const account = pickAccount(usable);
 
-    // ── Get next link: pending first, then due-for-retry failed links ──
-    let link = await db
-      .select()
-      .from(groupLinksTable)
-      .where(eq(groupLinksTable.status, "pending"))
-      .orderBy(asc(groupLinksTable.createdAt))
-      .limit(1)
-      .then((rows) => rows[0] ?? null);
+    // ── Get next link ──
+    const targetLinksCol = await collections.targetLinks();
+    let link = await targetLinksCol.findOne({ status: "pending" }, { sort: { createdAt: 1 } });
 
-    // If no pending links, look for retryable failed links whose delay has passed
     if (!link) {
-      link = await db
-        .select()
-        .from(groupLinksTable)
-        .where(
-          and(
-            eq(groupLinksTable.status, "failed"),
-            lt(groupLinksTable.retryCount, MAX_RETRY_COUNT),
-            and(
-              isNotNull(groupLinksTable.retryAfter),
-              lte(groupLinksTable.retryAfter, now)
-            )
-          )
-        )
-        .orderBy(asc(groupLinksTable.retryAfter))
-        .limit(1)
-        .then((rows) => rows[0] ?? null);
+      link = await targetLinksCol.findOne(
+        {
+          status: "failed",
+          retryCount: { $lt: MAX_RETRY_COUNT },
+          retryAfter: { $lte: now, $ne: null },
+        },
+        { sort: { retryAfter: 1 } }
+      );
     }
 
     if (!link) {
-      const [prevLink] = await db
-        .select()
-        .from(groupLinksTable)
-        .where(eq(groupLinksTable.status, "joined"))
-        .limit(1);
-      if (prevLink) {
+      const hasJoined = await targetLinksCol.countDocuments({ status: "joined" });
+      if (hasJoined > 0) {
         eventBus.publish({
           type: "links_exhausted",
           message: "📭 لا توجد روابط معلقة — انتهت قائمة الانتظار",
@@ -229,17 +176,14 @@ async function tick(): Promise<void> {
 
     // Reset failed links back to pending before attempting
     if (link.status === "failed") {
-      await db
-        .update(groupLinksTable)
-        .set({ status: "pending", retryAfter: null })
-        .where(eq(groupLinksTable.id, link.id));
+      await targetLinksCol.updateOne(
+        { _id: link._id },
+        { $set: { status: "pending", retryAfter: null } }
+      );
       link = { ...link, status: "pending", retryAfter: null };
     }
 
-    await db
-      .update(botStateTable)
-      .set({ currentAccountId: account.id })
-      .where(eq(botStateTable.id, state.id));
+    await setBotState({ currentAccountPhone: account.phone });
 
     await attemptJoin(account, link);
     scheduleNext(intervalMs);
@@ -249,34 +193,40 @@ async function tick(): Promise<void> {
   }
 }
 
-// ─── Account Rotation ───────────────────────────────────────────────────────────
+// ─── Account Rotation ────────────────────────────────────────────────────────
 
-function pickAccount(usable: Account[]): Account {
+function pickAccount(usable: AccountDoc[]): AccountDoc {
   accountIndex = accountIndex % usable.length;
   const account = usable[accountIndex]!;
   accountIndex = (accountIndex + 1) % usable.length;
   return account;
 }
 
-// ─── Join Attempt ───────────────────────────────────────────────────────────────
+// ─── Join Attempt ────────────────────────────────────────────────────────────
 
-async function attemptJoin(
-  account: Account,
-  link: typeof groupLinksTable.$inferSelect
-): Promise<void> {
+async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<void> {
+  const accountsCol = await collections.accounts();
+  const targetLinksCol = await collections.targetLinks();
+
   if (!account.sessionString) {
-    await db
-      .update(accountsTable)
-      .set({ status: "needs_auth" })
-      .where(eq(accountsTable.id, account.id));
-    await logActivity(
-      "join_failed",
-      `⚠️ الحساب ${account.phone} لا يملك جلسة نشطة — يرجى تسجيل الدخول`,
-      account.phone,
-      link.url,
-      "NO_SESSION"
+    await accountsCol.updateOne({ _id: account._id }, { $set: { status: "needs_auth", updatedAt: new Date() } });
+    await logActivity("join_failed", `⚠️ الحساب ${account.phone} لا يملك جلسة نشطة — يرجى تسجيل الدخول`, account.phone, link.url, "NO_SESSION");
+    await logJoinJob(account.phone, link.url, "failed", "NO_SESSION", "لا توجد جلسة نشطة");
+    return;
+  }
+
+  // ── Check JOINED collection — skip if already joined ──
+  const joinedCol = await collections.joined();
+  const alreadyJoined = await joinedCol.findOne({ url: link.url });
+  if (alreadyJoined) {
+    const msg = `✅ تم الانضمام مسبقاً لهذا الرابط من الحساب ${alreadyJoined.accountPhone}: ${link.url}`;
+    logger.info({ url: link.url, accountPhone: alreadyJoined.accountPhone }, "Link already in JOINED collection — skipping");
+    await targetLinksCol.updateOne(
+      { _id: link._id },
+      { $set: { status: "joined", usedByAccountPhone: alreadyJoined.accountPhone, processedAt: new Date() } }
     );
-    await logJoinJob(account.id, link.id, "failed", "NO_SESSION", "لا توجد جلسة نشطة");
+    await logActivity("join_success", msg, account.phone, link.url, "ALREADY_IN_JOINED");
+    await logJoinJob(account.phone, link.url, "success", "ALREADY_IN_JOINED", `تم الانضمام مسبقاً من ${alreadyJoined.accountPhone}`);
     return;
   }
 
@@ -287,23 +237,15 @@ async function attemptJoin(
     systemLangCode: account.systemLangCode ?? "ar",
     langPack: "tdesktop",
   };
-  const finalDevice = account.deviceModel
-    ? deviceProfile
-    : getDeviceProfileForPhone(account.phone);
+  const finalDevice = account.deviceModel ? deviceProfile : getDeviceProfileForPhone(account.phone);
 
   let client;
   try {
     client = await getClient(account.phone, account.sessionString, finalDevice);
   } catch (err) {
     logger.error({ err, phone: account.phone }, "Failed to get Telegram client");
-    await logActivity(
-      "join_failed",
-      `❌ فشل الاتصال للحساب ${account.phone}`,
-      account.phone,
-      link.url,
-      "CLIENT_ERROR"
-    );
-    await logJoinJob(account.id, link.id, "failed", "CLIENT_ERROR", "فشل إنشاء الاتصال");
+    await logActivity("join_failed", `❌ فشل الاتصال للحساب ${account.phone}`, account.phone, link.url, "CLIENT_ERROR");
+    await logJoinJob(account.phone, link.url, "failed", "CLIENT_ERROR", "فشل إنشاء الاتصال");
     return;
   }
 
@@ -315,252 +257,200 @@ async function attemptJoin(
     const rawType: string = String((joined as any)?.chatType ?? (joined as any)?.type ?? "");
     const groupType = categorizeChatType(rawType);
 
-    // ── Channel detection: leave immediately + save to channel_links ──
+    // ── Channel detection: leave immediately + save to Channels ──
     if (groupType === "channel") {
-      try {
-        await client.leaveChat(chatId ?? link.url);
-      } catch (leaveErr) {
-        logger.debug({ leaveErr, url: link.url }, "Could not leave channel (may be fine)");
-      }
+      try { await client.leaveChat(chatId ?? link.url); } catch {}
 
-      // Save to channel_links (ignore duplicate)
+      const channelsCol = await collections.channels();
       try {
-        await db.insert(channelLinksTable).values({ url: link.url, title: groupTitle }).onConflictDoNothing();
+        await channelsCol.insertOne({ _id: new ObjectId(), url: link.url, title: groupTitle, detectedAt: new Date() });
       } catch {}
 
-      await db
-        .update(groupLinksTable)
-        .set({ status: "skipped", failReason: "channel_type", groupTitle, groupType, processedAt: new Date() })
-        .where(eq(groupLinksTable.id, link.id));
+      await targetLinksCol.updateOne(
+        { _id: link._id },
+        { $set: { status: "skipped", failReason: "channel_type", groupTitle, groupType, processedAt: new Date() } }
+      );
 
       const msg = `📡 قناة — تم حفظها: ${groupTitle ?? link.url}`;
       await logActivity("skipped", msg, account.phone, link.url);
-      await logJoinJob(account.id, link.id, "skipped", "CHANNEL_TYPE", "قناة — تم الحفظ في مجموعة القنوات");
-
-      eventBus.publish({
-        type: "channel_detected",
-        message: msg,
-        accountPhone: account.phone,
-        linkUrl: link.url,
-        timestamp: new Date().toISOString(),
-      });
+      await logJoinJob(account.phone, link.url, "skipped", "CHANNEL_TYPE", "قناة — تم الحفظ في مجموعة القنوات");
+      eventBus.publish({ type: "channel_detected", message: msg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });
       return;
     }
 
     // ── Post-join observation + AI relevance check ──
     let sampleMessages: string[] = [];
-    if (chatId) {
-      sampleMessages = await observeGroupAfterJoin(client, chatId, link.url);
-    }
-
+    if (chatId) sampleMessages = await observeGroupAfterJoin(client, chatId, link.url);
     const relevant = await isRelevantGroupAsync(groupTitle, null, sampleMessages);
 
-    await db
-      .update(groupLinksTable)
-      .set({
-        status: "joined",
+    // ── Update TARGET_LINKS ──
+    await targetLinksCol.updateOne(
+      { _id: link._id },
+      {
+        $set: {
+          status: "joined",
+          groupTitle,
+          groupType,
+          usedByAccountPhone: account.phone,
+          processedAt: new Date(),
+          failReason: relevant ? null : "not_in_scope",
+        },
+      }
+    );
+
+    // ── Insert into JOINED (permanent dedup record) ──
+    try {
+      await joinedCol.insertOne({
+        _id: new ObjectId(),
+        url: link.url,
+        accountPhone: account.phone,
         groupTitle,
         groupType,
-        usedByAccountId: account.id,
-        processedAt: new Date(),
-        failReason: relevant ? null : "not_in_scope",
-      })
-      .where(eq(groupLinksTable.id, link.id));
+        joinedAt: new Date(),
+      });
+    } catch {}
 
-    await db
-      .update(accountsTable)
-      .set({
-        joinedCount: account.joinedCount + 1,
-        joinedToday: account.joinedToday + 1,
-        channelsCount: account.channelsCount + 1,
-        lastJoinAt: new Date(),
-      })
-      .where(eq(accountsTable.id, account.id));
+    // ── Update account counters ──
+    await accountsCol.updateOne(
+      { _id: account._id },
+      {
+        $inc: { joinedCount: 1, joinedToday: 1, channelsCount: 1 },
+        $set: { lastJoinAt: new Date(), updatedAt: new Date() },
+      }
+    );
 
     const msg = `✅ انضمام: ${groupTitle ?? link.url} [${account.phone}]`;
-    eventBus.publish({
-      type: "join_success",
-      message: msg,
-      accountPhone: account.phone,
-      linkUrl: link.url,
-      timestamp: new Date().toISOString(),
-    });
-
+    eventBus.publish({ type: "join_success", message: msg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });
     await logActivity("join_success", msg, account.phone, link.url);
-    await logJoinJob(account.id, link.id, "success");
+    await logJoinJob(account.phone, link.url, "success");
   } catch (err) {
     await handleJoinError(account, link, err);
   }
 }
 
-// ─── Error Handling ──────────────────────────────────────────────────────────────
+// ─── Error Handling ───────────────────────────────────────────────────────────
 
-async function handleJoinError(
-  account: Account,
-  link: typeof groupLinksTable.$inferSelect,
-  err: unknown
-): Promise<void> {
+async function handleJoinError(account: AccountDoc, link: TargetLinkDoc, err: unknown): Promise<void> {
   const info = classifyTelegramError(err);
   logger.warn({ phone: account.phone, url: link.url, code: info.code }, "Join error classified");
+
+  const accountsCol = await collections.accounts();
+  const targetLinksCol = await collections.targetLinks();
 
   switch (info.action) {
     case "flood_wait": {
       const waitSecs = info.waitSeconds ?? 300;
       const waitUntil = new Date(Date.now() + floodWaitMs(waitSecs));
-      await db
-        .update(accountsTable)
-        .set({ status: "flood_wait", floodWaitUntil: waitUntil })
-        .where(eq(accountsTable.id, account.id));
+      await accountsCol.updateOne({ _id: account._id }, { $set: { status: "flood_wait", floodWaitUntil: waitUntil, updatedAt: new Date() } });
       const msg = `⏳ FLOOD_WAIT ${waitSecs}s — الحساب ${account.phone}`;
       await logActivity("flood_wait", msg, account.phone, link.url, info.code, waitSecs);
-      await logJoinJob(account.id, link.id, "flood_wait", info.code, `انتظر ${waitSecs} ثانية`);
-      if (waitSecs > 3600) {
-        eventBus.publish({
-          type: "flood_wait_long",
-          message: msg,
-          accountPhone: account.phone,
-          waitSeconds: waitSecs,
-          timestamp: new Date().toISOString(),
-        });
-      }
+      await logJoinJob(account.phone, link.url, "flood_wait", info.code, `انتظر ${waitSecs} ثانية`);
+      if (waitSecs > 3600) eventBus.publish({ type: "flood_wait_long", message: msg, accountPhone: account.phone, waitSeconds: waitSecs, timestamp: new Date().toISOString() });
       break;
     }
 
     case "peer_flood": {
       const waitUntil = new Date(Date.now() + 24 * 3_600_000);
-      await db
-        .update(accountsTable)
-        .set({ status: "flood_wait", floodWaitUntil: waitUntil })
-        .where(eq(accountsTable.id, account.id));
+      await accountsCol.updateOne({ _id: account._id }, { $set: { status: "flood_wait", floodWaitUntil: waitUntil, updatedAt: new Date() } });
       const msg = `🚫 PEER_FLOOD — الحساب ${account.phone} محظور 24 ساعة`;
       await logActivity("flood_wait", msg, account.phone, link.url, info.code, 86400);
-      await logJoinJob(account.id, link.id, "flood_wait", info.code, "PEER_FLOOD — 24 ساعة");
-      eventBus.publish({
-        type: "flood_wait_long",
-        message: msg,
-        accountPhone: account.phone,
-        waitSeconds: 86400,
-        timestamp: new Date().toISOString(),
-      });
+      await logJoinJob(account.phone, link.url, "flood_wait", info.code, "PEER_FLOOD — 24 ساعة");
+      eventBus.publish({ type: "flood_wait_long", message: msg, accountPhone: account.phone, waitSeconds: 86400, timestamp: new Date().toISOString() });
       break;
     }
 
     case "channels_limit": {
-      await db
-        .update(accountsTable)
-        .set({ status: "channels_limit" })
-        .where(eq(accountsTable.id, account.id));
+      await accountsCol.updateOne({ _id: account._id }, { $set: { status: "channels_limit", updatedAt: new Date() } });
       await removeClient(account.phone);
       const msg = `⛔ CHANNELS_TOO_MUCH — الحساب ${account.phone} وصل لحد القنوات`;
       await logActivity("join_failed", msg, account.phone, link.url, info.code);
-      await logJoinJob(account.id, link.id, "failed", info.code, "وصل لحد القنوات (500)");
-      eventBus.publish({
-        type: "channels_limit",
-        message: msg,
-        accountPhone: account.phone,
-        timestamp: new Date().toISOString(),
-      });
+      await logJoinJob(account.phone, link.url, "failed", info.code, "وصل لحد القنوات (500)");
+      eventBus.publish({ type: "channels_limit", message: msg, accountPhone: account.phone, timestamp: new Date().toISOString() });
       break;
     }
 
     case "already_joined": {
-      // Mark link as joined — but do NOT count toward joinedToday to avoid burning daily limit
-      await db
-        .update(groupLinksTable)
-        .set({ status: "joined", usedByAccountId: account.id, processedAt: new Date() })
-        .where(eq(groupLinksTable.id, link.id));
-      await db
-        .update(accountsTable)
-        .set({ joinedCount: account.joinedCount + 1 })
-        .where(eq(accountsTable.id, account.id));
+      // Insert into JOINED (dedup record) + mark TARGET_LINKS as joined
+      const joinedCol = await collections.joined();
+      try {
+        await joinedCol.insertOne({
+          _id: new ObjectId(),
+          url: link.url,
+          accountPhone: account.phone,
+          groupTitle: null,
+          groupType: null,
+          joinedAt: new Date(),
+        });
+      } catch {}
+      await targetLinksCol.updateOne(
+        { _id: link._id },
+        { $set: { status: "joined", usedByAccountPhone: account.phone, processedAt: new Date() } }
+      );
+      await accountsCol.updateOne({ _id: account._id }, { $inc: { joinedCount: 1 }, $set: { updatedAt: new Date() } });
       await logActivity("join_success", `✅ مشترك مسبقاً: ${link.url}`, account.phone, link.url, info.code);
-      await logJoinJob(account.id, link.id, "success", info.code, "مشترك مسبقاً");
+      await logJoinJob(account.phone, link.url, "success", info.code, "مشترك مسبقاً");
       break;
     }
 
     case "auth_revoked": {
-      await db
-        .update(accountsTable)
-        .set({ status: "needs_auth", sessionString: null })
-        .where(eq(accountsTable.id, account.id));
+      await accountsCol.updateOne({ _id: account._id }, { $set: { status: "needs_auth", sessionString: null, updatedAt: new Date() } });
       await removeClient(account.phone);
       const msg = `🔑 ${info.code} — الحساب ${account.phone} يحتاج إعادة تسجيل الدخول`;
       await logActivity("join_failed", msg, account.phone, link.url, info.code);
-      await logJoinJob(account.id, link.id, "failed", info.code, "انتهت الجلسة — يحتاج re-auth");
-      eventBus.publish({
-        type: "account_needs_auth",
-        message: msg,
-        accountPhone: account.phone,
-        timestamp: new Date().toISOString(),
-      });
+      await logJoinJob(account.phone, link.url, "failed", info.code, "انتهت الجلسة — يحتاج re-auth");
+      eventBus.publish({ type: "account_needs_auth", message: msg, accountPhone: account.phone, timestamp: new Date().toISOString() });
       break;
     }
 
     case "account_banned": {
-      await db
-        .update(accountsTable)
-        .set({ status: "banned", sessionString: null })
-        .where(eq(accountsTable.id, account.id));
+      await accountsCol.updateOne({ _id: account._id }, { $set: { status: "banned", sessionString: null, updatedAt: new Date() } });
       await removeClient(account.phone);
       const msg = `🔴 الحساب ${account.phone} محظور من تيليجرام`;
       await logActivity("join_failed", msg, account.phone, link.url, info.code);
-      await logJoinJob(account.id, link.id, "failed", info.code, "الحساب محظور نهائياً");
-      eventBus.publish({
-        type: "account_banned",
-        message: msg,
-        accountPhone: account.phone,
-        timestamp: new Date().toISOString(),
-      });
+      await logJoinJob(account.phone, link.url, "failed", info.code, "الحساب محظور نهائياً");
+      eventBus.publish({ type: "account_banned", message: msg, accountPhone: account.phone, timestamp: new Date().toISOString() });
       break;
     }
 
     case "link_failed": {
-      await db
-        .update(groupLinksTable)
-        .set({ status: "failed", failReason: info.code, processedAt: new Date() })
-        .where(eq(groupLinksTable.id, link.id));
-      await db
-        .update(accountsTable)
-        .set({ failedCount: account.failedCount + 1 })
-        .where(eq(accountsTable.id, account.id));
+      await targetLinksCol.updateOne(
+        { _id: link._id },
+        { $set: { status: "failed", failReason: info.code, processedAt: new Date() } }
+      );
+      await accountsCol.updateOne({ _id: account._id }, { $inc: { failedCount: 1 }, $set: { updatedAt: new Date() } });
       await logActivity("join_failed", `❌ ${info.code}: ${link.url}`, account.phone, link.url, info.code);
-      await logJoinJob(account.id, link.id, "failed", info.code, "الرابط معطل أو خاص");
+      await logJoinJob(account.phone, link.url, "failed", info.code, "الرابط معطل أو خاص");
       break;
     }
 
     default: {
-      // Unknown error — retry up to MAX_RETRY_COUNT times with 1-hour delay between retries
       const newRetryCount = (link.retryCount ?? 0) + 1;
       const isExhausted = newRetryCount >= MAX_RETRY_COUNT;
       const retryAfterTime = isExhausted ? null : new Date(Date.now() + RETRY_DELAY_MS);
-
-      await db
-        .update(groupLinksTable)
-        .set({
-          status: "failed",
-          failReason: info.code,
-          retryCount: newRetryCount,
-          retryAfter: retryAfterTime,
-          processedAt: new Date(),
-        })
-        .where(eq(groupLinksTable.id, link.id));
-
-      await db
-        .update(accountsTable)
-        .set({ failedCount: account.failedCount + 1 })
-        .where(eq(accountsTable.id, account.id));
-
+      await targetLinksCol.updateOne(
+        { _id: link._id },
+        {
+          $set: {
+            status: "failed",
+            failReason: info.code,
+            retryCount: newRetryCount,
+            retryAfter: retryAfterTime,
+            processedAt: new Date(),
+          },
+        }
+      );
+      await accountsCol.updateOne({ _id: account._id }, { $inc: { failedCount: 1 }, $set: { updatedAt: new Date() } });
       const retryNote = isExhausted
         ? `(${newRetryCount}/${MAX_RETRY_COUNT} محاولات — فشل نهائي)`
         : `(محاولة ${newRetryCount}/${MAX_RETRY_COUNT} — إعادة المحاولة بعد ساعة)`;
       const msg = `❓ خطأ غير متوقع: ${info.code} — ${link.url} ${retryNote}`;
       await logActivity("join_failed", msg, account.phone, link.url, info.code);
-      await logJoinJob(account.id, link.id, isExhausted ? "failed" : "pending", info.code, retryNote);
+      await logJoinJob(account.phone, link.url, isExhausted ? "failed" : "pending", info.code, retryNote);
     }
   }
 }
 
-// ─── Internal helpers ────────────────────────────────────────────────────────────
+// ─── Internal helpers ─────────────────────────────────────────────────────────
 
 async function logActivity(
   type: string,
@@ -571,13 +461,16 @@ async function logActivity(
   waitSeconds?: number
 ): Promise<void> {
   try {
-    await db.insert(activityLogTable).values({
+    const col = await collections.activityLog();
+    await col.insertOne({
+      _id: new ObjectId(),
       type,
       message,
       accountPhone: accountPhone ?? null,
       linkUrl: linkUrl ?? null,
       errorCode: errorCode ?? null,
       waitSeconds: waitSeconds ?? null,
+      createdAt: new Date(),
     });
   } catch (e) {
     logger.error({ err: e }, "Failed to insert activity log");
@@ -585,21 +478,24 @@ async function logActivity(
 }
 
 async function logJoinJob(
-  accountId: number,
-  linkId: number,
+  accountPhone: string,
+  linkUrl: string,
   status: string,
   errorCode?: string,
   errorMessage?: string
 ): Promise<void> {
   try {
-    await db.insert(joinJobsTable).values({
-      accountId,
-      linkId,
+    const col = await collections.joinHistory();
+    await col.insertOne({
+      _id: new ObjectId(),
+      accountPhone,
+      linkUrl,
       status,
       errorCode: errorCode ?? null,
       errorMessage: errorMessage ?? null,
+      createdAt: new Date(),
     });
   } catch (e) {
-    logger.error({ err: e }, "Failed to insert join job");
+    logger.error({ err: e }, "Failed to insert join history");
   }
 }

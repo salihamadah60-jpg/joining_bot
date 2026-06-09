@@ -1,33 +1,25 @@
 import { Router, type IRouter } from "express";
-import { db, channelLinksTable } from "@workspace/db";
-import { desc } from "drizzle-orm";
+import { collections } from "@workspace/db";
 
 const router: IRouter = Router();
 
 router.get("/channels", async (req, res): Promise<void> => {
-  const channels = await db
-    .select()
-    .from(channelLinksTable)
-    .orderBy(desc(channelLinksTable.detectedAt));
-  res.json(
-    channels.map((c) => ({
-      id: c.id,
-      url: c.url,
-      title: c.title,
-      detectedAt: c.detectedAt.toISOString(),
-    }))
-  );
+  const col = await collections.channels();
+  const channels = await col.find({}).sort({ detectedAt: -1 }).toArray();
+  res.json(channels.map((c) => ({
+    id: c._id.toString(),
+    url: c.url,
+    title: c.title ?? null,
+    detectedAt: c.detectedAt ? new Date(c.detectedAt).toISOString() : new Date().toISOString(),
+  })));
 });
 
 /**
  * Export all channel links as a plain-text file (UTF-8, numbered list).
- * The file can be opened directly in Word/LibreOffice.
  */
 router.get("/channels/export", async (req, res): Promise<void> => {
-  const channels = await db
-    .select()
-    .from(channelLinksTable)
-    .orderBy(desc(channelLinksTable.detectedAt));
+  const col = await collections.channels();
+  const channels = await col.find({}).sort({ detectedAt: -1 }).toArray();
 
   const dateStr = new Date().toLocaleString("ar-SA", { timeZone: "Asia/Riyadh" });
   const lines = channels.map(

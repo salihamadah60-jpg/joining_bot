@@ -1,98 +1,65 @@
 ---
 name: Telegram Bot Manager Setup
-description: Critical decisions, gotchas, and architectural constraints for this Telegram multi-account bot manager project.
+description: Architecture decisions, gotchas, and conventions for the MongoDB-only multi-account bot manager
 ---
 
-## CRITICAL: No SQLite / better-sqlite3 — Use MemoryStorage
+# MongoDB-only architecture (June 2026)
 
-`better-sqlite3` was permanently removed from the project. It caused a V8 symbol mismatch crash (`undefined symbol: _ZN2v812api_internal33ConvertToJSGlobalProxyIfNecessaryEm`) because the binary was compiled for a different Node.js version.
+## Rule: No PostgreSQL, Drizzle, SQLite, or better-sqlite3
+All data lives in MongoDB (`MONGODB_URL` env var, database `Joining_links`). Fully removed: Drizzle ORM, pg driver, better-sqlite3, @workspace/api-zod dependency from api-server.
 
-**Fix applied:**
-- Removed `better-sqlite3` from `api-server/package.json`
-- Added `@mtcute/core` as direct dependency
-- `clientPool.ts` now uses `new MemoryStorage()` (from `@mtcute/core`) instead of SQLite file paths
-- `auth.ts` now uses `createTempClient()` which also uses `MemoryStorage` — no temp `.db` files
+**Why:** User explicitly migrated away from PostgreSQL. MongoDB is the sole database.
 
-**Why:** Sessions persist across restarts via `sessionString` column in PostgreSQL and MongoDB `tg_sessions`. MemoryStorage is loaded from DB on client creation.
+**How to apply:** All new database operations go through `lib/db/src/mongo.ts` → `collections` accessor. Never re-add Drizzle or pg.
 
-**Do NOT re-add `better-sqlite3`** — user explicitly demanded its permanent removal.
+## Collections schema
+- `accounts` — unique index on `phone`; field `sessionString` holds Telegram session string
+- `TARGET_LINKS` — join queue, unique on `url`, status: pending/joined/failed/skipped
+- `JOINED` — permanent dedup record, unique on `url`. Checked BEFORE every join; inserted on success. Persists across restarts.
+- `Channels` — detected channel-type links (left immediately + saved here)
+- `activity_log` — engine event log
+- `join_history` — per-attempt record
+- `mongo_collections` — external MongoDB sync sources config
+- `settings` — key/value config, unique on `key`
+- `bot_state` — singleton doc (`_id: "singleton"`)
+- `tg_sessions` — session backup/import source
+
+## Telegram client pool
+Uses `MemoryStorage` from `@mtcute/core` — no SQLite files. Session strings stored in `accounts.sessionString`. **Do NOT re-add `better-sqlite3`.**
+
+**Why:** `better-sqlite3` caused V8 symbol mismatch crash in this environment. MemoryStorage + MongoDB-backed session strings is the working pattern.
 
 ## Critical: @mtcute WASM in Production Build
+`@mtcute/node` uses `require.resolve('@mtcute/wasm/mtcute-simd.wasm')` at runtime. esbuild must externalize it.
 
-`@mtcute/node` uses `require.resolve('@mtcute/wasm/mtcute-simd.wasm')` at runtime. When esbuild bundles everything into one `dist/index.mjs`, this path breaks and crashes the server.
+**Fix in `build.mjs` externals list:** `"@mtcute/*"`, `"mtcute"`, `"*.wasm"`
 
-**Fix in `build.mjs` externals list:**
-```
-"@mtcute/*",
-"mtcute",
-"*.wasm",
-```
+## lib/db build requirement
+`lib/db` uses `composite: true` tsconfig and must be built (`pnpm --filter @workspace/db run build`) before api-server typecheck passes, because api-server references it via TypeScript project references.
 
-**Why:** esbuild inlines node_modules into the bundle, breaking relative path resolution inside @mtcute for `.wasm` file loading.
+## IDs
+All MongoDB IDs are ObjectId strings. Routes accept `req.params.id` as string with `ObjectId.isValid(id)` check. No integer IDs anywhere.
 
-## Stack Decision: @mtcute/node
+## bot_state singleton
+`_id: "singleton"` (string). Upserted on `initMongo()`. Use `getBotState()` / `setBotState()` helpers from `lib/db`.
 
-- Using `@mtcute/node` for Telegram MTProto (not GramJS — blocked by firewall on `es5-ext`)
-- Session stored as string in `accounts.session_string` (PostgreSQL) + MongoDB `tg_sessions`
-- MemoryStorage used for all clients — no SQLite files needed
-
-## Critical: drizzle-orm Dual Instance
-
-`@mtcute/node` brings `better-sqlite3` as a peer dep. The override below prevents pnpm from creating two instances of drizzle-orm.
-
-**Fix in `pnpm-workspace.yaml`:**
-```yaml
-overrides:
-  "drizzle-orm>better-sqlite3": "-"
-```
-Never remove this override.
-
-## DB Migrations
-
-`drizzle-kit push` requires TTY (interactive prompts). In Replit bash, use:
-```bash
-psql "$DATABASE_URL" -c "ALTER TABLE ..."
-```
-
-## api-zod Index Fix
-
-`lib/api-zod/src/index.ts` must only export from `"./generated/api"` — NOT from `"./generated/types"`. The types/ folder has TypeScript types with same names as Zod schemas, causing duplicate export errors.
-
-**IMPORTANT:** Orval codegen OVERWRITES `lib/api-zod/src/index.ts` and re-adds the `./generated/types` export every time. After running `pnpm exec orval`, immediately run:
-```
-echo 'export * from "./generated/api";' > lib/api-zod/src/index.ts
-```
-
-## Port Configuration (Critical)
-
-- Dashboard: port 5000 (Replit mandates port 5000 for webview)
+## Port Configuration
+- Dashboard: port 5000 (Replit webview)
 - API server: port 8080
 - Vite proxy (`vite.config.ts`): `/api` → `http://localhost:8080`
 
-## MongoDB Config
-
-- `MONGODB_URL` env var used as fallback for all MongoDB connections
-- Database name: `Joining_links`, collection: `tg_sessions`
-- `mongoSessionBackup.ts` reads url/dbName from settings table first, falls back to env var
-- `importAccountsFromMongo()` creates new PostgreSQL accounts from MongoDB data (not just restores)
-
-## Settings ALLOWED_KEYS
-
-`settings.ts` PUT endpoint has an explicit `ALLOWED_KEYS` set. Current set: `telegram_api_id`, `telegram_api_hash`, `auto_sync_interval_minutes`, `active_start_hour`, `ai_filter_enabled`, `mongo_backup_url`, `mongo_backup_db`.
-
-## Engine Account Rotation (Critical)
-
-- `allActive` accounts query MUST have `.orderBy(asc(accountsTable.id))`
-- `flood_wait` accounts auto-reset at start of each tick
-- `usable` filter only checks `joinedToday >= dailyLimit`
+## Engine
+- Auto-resumes on restart if `bot_state.running = true`
+- Blackout: 2 AM – 8 AM (configurable via `active_start_hour` setting)
+- Per-account safe interval: ~1029s (~17.2 min), ±25% jitter
+- DAILY_LIMIT: 85 joins / account / 18-hour window
+- JOINED dedup: checked at top of `attemptJoin()` before any Telegram call
 
 ## Auth Flow (Telegram OTP)
+In-memory `Map<phone, PendingSession>` holds TelegramClient mid-flow. Sessions auto-expire after 10 min. After verify, `client.exportSession()` string saved to `accounts.sessionString`.
 
-In-memory `Map<phone, PendingSession>` holds TelegramClient mid-flow. Sessions auto-expire after 10 min. After verify, `client.exportSession()` string saved to `accounts.session_string`. No temp files.
+## Settings ALLOWED_KEYS
+`telegram_api_id`, `telegram_api_hash`, `auto_sync_interval_minutes`, `active_start_hour`, `ai_filter_enabled`, `mongo_backup_url`, `mongo_backup_db`
 
-## Engine
-
-- Auto-resumes on restart if `bot_state.running = true` in DB
-- Blackout: 2 AM – 8 AM no joins (configurable)
-- Per-account safe interval: ~1029s (~17.2 min), ±25% jitter
-- Error handling: flood_wait / peer_flood / channels_limit / already_joined / auth_revoked / account_banned / link_failed / unknown
+## pnpm-workspace.yaml
+`drizzle-orm` removed from catalog. `better-sqlite3` removed from `onlyBuiltDependencies`. `"drizzle-orm>better-sqlite3": "-"` override removed (no longer needed since Drizzle is gone).

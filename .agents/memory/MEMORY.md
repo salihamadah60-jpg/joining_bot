@@ -1,1 +1,1 @@
-- [Telegram Bot Manager Setup](telegram-bot-setup.md) — better-sqlite3 native build, drizzle-orm dual instance fix, auth flow, engine design
+- [Telegram Bot Manager Setup](telegram-bot-setup.md) — MongoDB-only architecture, MemoryStorage for Telegram sessions, no PostgreSQL/SQLite/Drizzle

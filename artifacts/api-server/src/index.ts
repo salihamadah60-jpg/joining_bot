@@ -3,13 +3,12 @@ import { logger } from "./lib/logger";
 import { engineInit } from "./lib/telegramEngine";
 import { cleanupIdleClients } from "./lib/clientPool";
 import { startAutoSync } from "./lib/mongoSync";
+import { initMongo } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
 
 if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
+  throw new Error("PORT environment variable is required but was not provided.");
 }
 
 const port = Number(rawPort);
@@ -25,6 +24,15 @@ app.listen(port, async (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // Initialize MongoDB: create indexes + ensure bot_state singleton
+  try {
+    await initMongo();
+    logger.info("MongoDB initialized (indexes + bot_state singleton ensured)");
+  } catch (e) {
+    logger.error({ err: e }, "Failed to initialize MongoDB");
+    process.exit(1);
+  }
 
   // Initialize the bot engine (resumes if it was running before restart)
   try {

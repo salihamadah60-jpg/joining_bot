@@ -1,25 +1,42 @@
 import { Router, type IRouter } from "express";
-import { eq, sql } from "drizzle-orm";
-import { db, accountsTable } from "@workspace/db";
-import {
-  ListAccountsResponse,
-  CreateAccountBody,
-  GetAccountParams,
-  GetAccountResponse,
-  UpdateAccountParams,
-  UpdateAccountBody,
-  UpdateAccountResponse,
-  DeleteAccountParams,
-  GetAccountsStatsResponse,
-} from "@workspace/api-zod";
+import { ObjectId } from "mongodb";
+import { collections } from "@workspace/db";
 import { getClient } from "../lib/clientPool.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 
+function serializeAccount(a: any) {
+  return {
+    id: a._id.toString(),
+    phone: a.phone,
+    label: a.label ?? null,
+    status: a.status,
+    hasSession: !!a.sessionString,
+    joinedCount: a.joinedCount ?? 0,
+    failedCount: a.failedCount ?? 0,
+    joinedToday: a.joinedToday ?? 0,
+    dailyLimit: a.dailyLimit ?? 85,
+    currentDelay: a.currentDelay ?? 1030,
+    channelsCount: a.channelsCount ?? 0,
+    isPremium: a.isPremium ?? false,
+    deviceModel: a.deviceModel ?? null,
+    systemVersion: a.systemVersion ?? null,
+    appVersion: a.appVersion ?? null,
+    systemLangCode: a.systemLangCode ?? null,
+    floodWaitUntil: a.floodWaitUntil ? new Date(a.floodWaitUntil).toISOString() : null,
+    lastJoinAt: a.lastJoinAt ? new Date(a.lastJoinAt).toISOString() : null,
+    nextJoinAllowedAt: a.nextJoinAllowedAt ? new Date(a.nextJoinAllowedAt).toISOString() : null,
+    dailyResetAt: a.dailyResetAt ? new Date(a.dailyResetAt).toISOString() : null,
+    createdAt: a.createdAt ? new Date(a.createdAt).toISOString() : new Date().toISOString(),
+    updatedAt: a.updatedAt ? new Date(a.updatedAt).toISOString() : new Date().toISOString(),
+  };
+}
+
 router.get("/accounts/stats", async (req, res): Promise<void> => {
-  const accounts = await db.select().from(accountsTable);
-  const stats = {
+  const col = await collections.accounts();
+  const accounts = await col.find({}).toArray();
+  res.json({
     total: accounts.length,
     active: accounts.filter((a) => a.status === "active").length,
     paused: accounts.filter((a) => a.status === "paused").length,
@@ -27,81 +44,119 @@ router.get("/accounts/stats", async (req, res): Promise<void> => {
     floodWait: accounts.filter((a) => a.status === "flood_wait").length,
     needsAuth: accounts.filter((a) => a.status === "needs_auth").length,
     channelsLimit: accounts.filter((a) => a.status === "channels_limit").length,
-    totalJoined: accounts.reduce((sum, a) => sum + a.joinedCount, 0),
-    totalFailed: accounts.reduce((sum, a) => sum + a.failedCount, 0),
-  };
-  res.json(GetAccountsStatsResponse.parse(stats));
+    totalJoined: accounts.reduce((sum, a) => sum + (a.joinedCount ?? 0), 0),
+    totalFailed: accounts.reduce((sum, a) => sum + (a.failedCount ?? 0), 0),
+  });
 });
 
 router.get("/accounts", async (req, res): Promise<void> => {
-  const accounts = await db.select().from(accountsTable).orderBy(accountsTable.createdAt);
-  res.json(ListAccountsResponse.parse(accounts.map(serializeAccount)));
+  const col = await collections.accounts();
+  const accounts = await col.find({}).sort({ createdAt: 1 }).toArray();
+  res.json(accounts.map(serializeAccount));
 });
 
 router.post("/accounts", async (req, res): Promise<void> => {
-  const parsed = CreateAccountBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  const body = req.body as { phone?: string; label?: string; status?: string };
+  if (!body?.phone || typeof body.phone !== "string") {
+    res.status(400).json({ error: "phone is required" });
     return;
   }
   const { getDeviceProfileForPhone } = await import("../lib/deviceProfiles.js");
-  const device = getDeviceProfileForPhone(parsed.data.phone);
-  const [account] = await db.insert(accountsTable).values({
-    ...parsed.data,
-    deviceModel: device.deviceModel,
-    systemVersion: device.systemVersion,
-    appVersion: device.appVersion,
-    systemLangCode: device.systemLangCode,
-  }).returning();
-  res.status(201).json(GetAccountResponse.parse(serializeAccount(account)));
+  const device = getDeviceProfileForPhone(body.phone);
+  const now = new Date();
+  const col = await collections.accounts();
+  try {
+    const result = await col.insertOne({
+      _id: new ObjectId(),
+      phone: body.phone,
+      label: body.label ?? null,
+      status: body.status ?? "active",
+      sessionString: null,
+      joinedCount: 0,
+      failedCount: 0,
+      joinedToday: 0,
+      dailyLimit: 85,
+      currentDelay: 1030,
+      floodWaitUntil: null,
+      lastJoinAt: null,
+      nextJoinAllowedAt: null,
+      dailyResetAt: null,
+      channelsCount: 0,
+      isPremium: false,
+      deviceModel: device.deviceModel,
+      systemVersion: device.systemVersion,
+      appVersion: device.appVersion,
+      systemLangCode: device.systemLangCode,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const account = await col.findOne({ _id: result.insertedId });
+    res.status(201).json(serializeAccount(account));
+  } catch (e: any) {
+    if (e.code === 11000) {
+      res.status(409).json({ error: "Account with this phone already exists" });
+      return;
+    }
+    throw e;
+  }
 });
 
 router.get("/accounts/:id", async (req, res): Promise<void> => {
-  const params = GetAccountParams.safeParse({
-    id: Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id),
-  });
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
-  const [account] = await db.select().from(accountsTable).where(eq(accountsTable.id, params.data.id));
+  const id = req.params["id"];
+  if (!id || !ObjectId.isValid(id)) {
+    res.status(400).json({ error: "Invalid account id" });
+    return;
+  }
+  const col = await collections.accounts();
+  const account = await col.findOne({ _id: new ObjectId(id) });
   if (!account) { res.status(404).json({ error: "Account not found" }); return; }
-  res.json(GetAccountResponse.parse(serializeAccount(account)));
+  res.json(serializeAccount(account));
 });
 
 router.patch("/accounts/:id", async (req, res): Promise<void> => {
-  const params = UpdateAccountParams.safeParse({
-    id: Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id),
-  });
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
-  const parsed = UpdateAccountBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-  const [account] = await db
-    .update(accountsTable)
-    .set(parsed.data)
-    .where(eq(accountsTable.id, params.data.id))
-    .returning();
-  if (!account) { res.status(404).json({ error: "Account not found" }); return; }
-  res.json(UpdateAccountResponse.parse(serializeAccount(account)));
+  const id = req.params["id"];
+  if (!id || !ObjectId.isValid(id)) {
+    res.status(400).json({ error: "Invalid account id" });
+    return;
+  }
+  const body = req.body as Record<string, any>;
+  const allowed = ["label", "status", "sessionString", "joinedCount", "failedCount",
+    "joinedToday", "dailyLimit", "channelsCount", "isPremium", "deviceModel",
+    "systemVersion", "appVersion", "systemLangCode"];
+  const updates: Record<string, any> = { updatedAt: new Date() };
+  for (const key of allowed) {
+    if (key in body) updates[key] = body[key];
+  }
+  const col = await collections.accounts();
+  const result = await col.findOneAndUpdate(
+    { _id: new ObjectId(id) },
+    { $set: updates },
+    { returnDocument: "after" }
+  );
+  if (!result) { res.status(404).json({ error: "Account not found" }); return; }
+  res.json(serializeAccount(result));
 });
 
 router.delete("/accounts/:id", async (req, res): Promise<void> => {
-  const params = DeleteAccountParams.safeParse({
-    id: Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id),
-  });
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
-  const [deleted] = await db.delete(accountsTable).where(eq(accountsTable.id, params.data.id)).returning();
-  if (!deleted) { res.status(404).json({ error: "Account not found" }); return; }
+  const id = req.params["id"];
+  if (!id || !ObjectId.isValid(id)) {
+    res.status(400).json({ error: "Invalid account id" });
+    return;
+  }
+  const col = await collections.accounts();
+  const result = await col.deleteOne({ _id: new ObjectId(id) });
+  if (result.deletedCount === 0) { res.status(404).json({ error: "Account not found" }); return; }
   res.sendStatus(204);
 });
 
-/**
- * POST /accounts/:id/sync-dialogs
- * Fetches real dialog count from Telegram and updates channelsCount.
- * Also returns the count so the dashboard can display it.
- */
 router.post("/accounts/:id/sync-dialogs", async (req, res): Promise<void> => {
-  const id = Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
-
-  const [account] = await db.select().from(accountsTable).where(eq(accountsTable.id, id));
+  const id = req.params["id"];
+  if (!id || !ObjectId.isValid(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const col = await collections.accounts();
+  const account = await col.findOne({ _id: new ObjectId(id) });
   if (!account) { res.status(404).json({ error: "Account not found" }); return; }
   if (!account.sessionString) { res.status(400).json({ error: "Account has no active session" }); return; }
 
@@ -116,11 +171,9 @@ router.post("/accounts/:id/sync-dialogs", async (req, res): Promise<void> => {
 
   let count = 0;
   try {
-    // Iterate all dialogs — @mtcute returns an AsyncIterable
     const dialogs = (client as any).getDialogs
       ? (client as any).getDialogs({ limit: 600 })
       : null;
-
     if (dialogs) {
       for await (const _ of dialogs) {
         count++;
@@ -128,31 +181,14 @@ router.post("/accounts/:id/sync-dialogs", async (req, res): Promise<void> => {
       }
     }
   } catch (err) {
-    logger.warn({ err, phone: account.phone }, "Could not iterate dialogs — using stored count");
+    logger.warn({ err, phone: account.phone }, "Could not iterate dialogs");
     res.json({ channelsCount: account.channelsCount, synced: false, note: "تعذّر جلب القائمة من تيليجرام" });
     return;
   }
 
-  await db
-    .update(accountsTable)
-    .set({ channelsCount: count })
-    .where(eq(accountsTable.id, id));
-
+  await col.updateOne({ _id: new ObjectId(id) }, { $set: { channelsCount: count, updatedAt: new Date() } });
   logger.info({ phone: account.phone, count }, "Dialog sync complete");
   res.json({ channelsCount: count, synced: true });
 });
-
-function serializeAccount(a: typeof accountsTable.$inferSelect) {
-  return {
-    ...a,
-    hasSession: !!a.sessionString,
-    sessionString: undefined,
-    floodWaitUntil: a.floodWaitUntil ? a.floodWaitUntil.toISOString() : null,
-    lastJoinAt: a.lastJoinAt ? a.lastJoinAt.toISOString() : null,
-    nextJoinAllowedAt: a.nextJoinAllowedAt ? a.nextJoinAllowedAt.toISOString() : null,
-    dailyResetAt: a.dailyResetAt ? a.dailyResetAt.toISOString() : null,
-    createdAt: a.createdAt.toISOString(),
-  };
-}
 
 export default router;

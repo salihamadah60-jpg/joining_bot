@@ -12,6 +12,7 @@ export type BotEventType =
   | "account_needs_auth"
   | "flood_wait_long"
   | "channels_limit"
+  | "channel_detected"
   | "links_exhausted"
   | "join_success"
   | "join_failed"

@@ -1,62 +1,50 @@
 /**
  * MONGODB SESSION BACKUP
  *
- * Backs up and restores Telegram account sessions to/from MongoDB.
- * Collection: `tg_sessions`
+ * Backs up and restores Telegram account sessions to/from MongoDB tg_sessions.
+ * Since accounts are now stored in MongoDB, this syncs between:
+ *   accounts collection (primary) ←→ tg_sessions collection (backup/import source)
  *
  * Config priority:
- *   1. settings table (mongo_backup_url / mongo_backup_db)
- *   2. MONGODB_URL env var (database name extracted from URL or defaults to Joining_links)
+ *   1. settings collection (mongo_backup_url / mongo_backup_db)
+ *   2. MONGODB_URL env var
  */
 
-import { db, accountsTable, settingsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { ObjectId } from "mongodb";
+import { collections, getSettings } from "@workspace/db";
 import { logger } from "./logger.js";
 
 async function getBackupConfig(): Promise<{ url: string; dbName: string } | null> {
-  // 1. Try settings table first
   try {
-    const rows = await db.select().from(settingsTable);
-    const kv: Record<string, string> = {};
-    for (const r of rows) kv[r.key] = r.value;
-
+    const kv = await getSettings();
     const url = kv["mongo_backup_url"]?.trim();
     if (url) {
       const dbName = kv["mongo_backup_db"]?.trim() || extractDbName(url) || "Joining_links";
       return { url, dbName };
     }
-  } catch {
-    // ignore — fall through to env var
-  }
+  } catch {}
 
-  // 2. Fall back to MONGODB_URL env var
   const envUrl = process.env["MONGODB_URL"]?.trim();
   if (envUrl) {
     const dbName = extractDbName(envUrl) || "Joining_links";
     return { url: envUrl, dbName };
   }
-
   return null;
 }
 
-/** Extract database name from a MongoDB connection string if present */
 function extractDbName(url: string): string | null {
   try {
-    // mongodb+srv://user:pass@cluster.net/dbname?options
     const match = url.match(/\/([^/?]+)\??/);
     if (match && match[1] && match[1] !== "" && !match[1].startsWith("mongodb")) {
       return match[1];
     }
-  } catch {
-    // ignore
-  }
+  } catch {}
   return null;
 }
 
 /**
- * Import ALL accounts from MongoDB into PostgreSQL.
+ * Import ALL accounts from MongoDB tg_sessions into the accounts collection.
  * Creates new accounts if they don't exist, updates existing ones.
- * This is the primary import path for accounts stored in tg_sessions.
  */
 export async function importAccountsFromMongo(): Promise<{
   imported: number;
@@ -85,9 +73,8 @@ export async function importAccountsFromMongo(): Promise<{
   try {
     await client.connect();
     const mongoDb = client.db(config.dbName);
-    const col = mongoDb.collection("tg_sessions");
-
-    const docs = await col.find({}).toArray();
+    const tgSessions = mongoDb.collection("tg_sessions");
+    const docs = await tgSessions.find({}).toArray();
     total = docs.length;
 
     if (total === 0) {
@@ -95,12 +82,11 @@ export async function importAccountsFromMongo(): Promise<{
       return { imported: 0, updated: 0, skipped: 0, errors: 0, total: 0 };
     }
 
+    const accountsCol = await collections.accounts();
+
     for (const doc of docs) {
       const phone = String(doc["phone"] ?? "").trim();
-      if (!phone || phone.length < 5) {
-        skipped++;
-        continue;
-      }
+      if (!phone || phone.length < 5) { skipped++; continue; }
 
       const sessionString = (doc["sessionString"] ?? doc["session_string"] ?? null) as string | null;
       const label = (doc["label"] ?? null) as string | null;
@@ -111,43 +97,48 @@ export async function importAccountsFromMongo(): Promise<{
       const systemVersion = (doc["systemVersion"] ?? doc["system_version"] ?? null) as string | null;
 
       try {
-        // Check if account already exists
-        const existing = await db
-          .select({ id: accountsTable.id, sessionString: accountsTable.sessionString })
-          .from(accountsTable)
-          .where(eq(accountsTable.phone, phone))
-          .limit(1);
+        const existing = await accountsCol.findOne({ phone }, { projection: { _id: 1, sessionString: 1 } });
 
-        if (existing.length === 0) {
-          // Insert new account
-          await db.insert(accountsTable).values({
+        if (!existing) {
+          const { getDeviceProfileForPhone } = await import("./deviceProfiles.js");
+          const device = getDeviceProfileForPhone(phone);
+          const now = new Date();
+          await accountsCol.insertOne({
+            _id: new ObjectId(),
             phone,
             label,
             status,
             sessionString,
             joinedCount,
-            deviceModel,
-            systemVersion,
+            failedCount: 0,
+            joinedToday: 0,
+            dailyLimit: 85,
+            currentDelay: 1030,
+            floodWaitUntil: null,
+            lastJoinAt: null,
+            nextJoinAllowedAt: null,
+            dailyResetAt: null,
+            channelsCount: 0,
+            isPremium: false,
+            deviceModel: deviceModel ?? device.deviceModel,
+            systemVersion: systemVersion ?? device.systemVersion,
+            appVersion: device.appVersion,
+            systemLangCode: device.systemLangCode,
+            createdAt: now,
+            updatedAt: now,
           });
           imported++;
           logger.info({ phone, label }, "Imported account from MongoDB");
         } else {
-          // Update existing account — only overwrite session if we have a better one
-          const updates: Partial<typeof accountsTable.$inferInsert> = {};
-          if (label) updates.label = label;
-          if (deviceModel) updates.deviceModel = deviceModel;
-          if (systemVersion) updates.systemVersion = systemVersion;
-          if (joinedCount > 0) updates.joinedCount = joinedCount;
-          // Only restore session if existing one is missing
-          if (sessionString && !existing[0]?.sessionString) {
-            updates.sessionString = sessionString;
-          }
+          const updates: Record<string, any> = { updatedAt: new Date() };
+          if (label) updates["label"] = label;
+          if (deviceModel) updates["deviceModel"] = deviceModel;
+          if (systemVersion) updates["systemVersion"] = systemVersion;
+          if (joinedCount > 0) updates["joinedCount"] = joinedCount;
+          if (sessionString && !existing.sessionString) updates["sessionString"] = sessionString;
 
-          if (Object.keys(updates).length > 0) {
-            await db
-              .update(accountsTable)
-              .set(updates)
-              .where(eq(accountsTable.phone, phone));
+          if (Object.keys(updates).length > 1) {
+            await accountsCol.updateOne({ phone }, { $set: updates });
             updated++;
           } else {
             skipped++;
@@ -168,7 +159,7 @@ export async function importAccountsFromMongo(): Promise<{
 }
 
 /**
- * Backup all account sessions to MongoDB.
+ * Backup all account sessions to MongoDB tg_sessions.
  */
 export async function backupSessionsToMongo(): Promise<{
   backedUp: number;
@@ -181,7 +172,8 @@ export async function backupSessionsToMongo(): Promise<{
     throw new Error("لم يتم إعداد رابط MongoDB. أضف MONGODB_URL في متغيرات البيئة أو في الإعدادات.");
   }
 
-  const accounts = await db.select().from(accountsTable);
+  const accountsCol = await collections.accounts();
+  const accounts = await accountsCol.find({}).toArray();
   let backedUp = 0;
   let skipped = 0;
   let errors = 0;
@@ -196,14 +188,10 @@ export async function backupSessionsToMongo(): Promise<{
     await client.connect();
     const mongoDb = client.db(config.dbName);
     const col = mongoDb.collection("tg_sessions");
-
     await col.createIndex({ phone: 1 }, { unique: true });
 
     for (const account of accounts) {
-      if (!account.sessionString) {
-        skipped++;
-        continue;
-      }
+      if (!account.sessionString) { skipped++; continue; }
       try {
         await col.replaceOne(
           { phone: account.phone },
@@ -224,7 +212,6 @@ export async function backupSessionsToMongo(): Promise<{
         logger.warn({ phone: account.phone, err }, "Failed to backup session");
       }
     }
-
     logger.info({ backedUp, skipped, errors }, "Session backup to MongoDB complete");
   } finally {
     await client.close();
@@ -235,7 +222,6 @@ export async function backupSessionsToMongo(): Promise<{
 
 /**
  * Restore sessions from MongoDB for accounts that are missing a session string.
- * Only updates existing accounts — use importAccountsFromMongo() to also create new ones.
  */
 export async function restoreSessionsFromMongo(): Promise<{
   restored: number;
@@ -247,8 +233,8 @@ export async function restoreSessionsFromMongo(): Promise<{
     throw new Error("لم يتم إعداد رابط MongoDB. أضف MONGODB_URL في متغيرات البيئة أو في الإعدادات.");
   }
 
-  const accounts = await db.select().from(accountsTable);
-  const accountsWithoutSession = accounts.filter((a) => !a.sessionString);
+  const accountsCol = await collections.accounts();
+  const accountsWithoutSession = await accountsCol.find({ sessionString: null }).toArray();
   if (accountsWithoutSession.length === 0) return { restored: 0, skipped: 0, errors: 0 };
 
   const { MongoClient } = await import("mongodb");
@@ -263,20 +249,13 @@ export async function restoreSessionsFromMongo(): Promise<{
 
   try {
     await client.connect();
-    const mongoDb = client.db(config.dbName);
-    const col = mongoDb.collection("tg_sessions");
+    const col = client.db(config.dbName).collection("tg_sessions");
 
     for (const account of accountsWithoutSession) {
       const doc = await col.findOne({ phone: account.phone });
-      if (!doc?.sessionString) {
-        skipped++;
-        continue;
-      }
+      if (!doc?.sessionString) { skipped++; continue; }
       try {
-        await db
-          .update(accountsTable)
-          .set({ sessionString: doc.sessionString })
-          .where(eq(accountsTable.phone, account.phone));
+        await accountsCol.updateOne({ phone: account.phone }, { $set: { sessionString: doc.sessionString, updatedAt: new Date() } });
         restored++;
         logger.info({ phone: account.phone }, "Session restored from MongoDB backup");
       } catch (err) {
