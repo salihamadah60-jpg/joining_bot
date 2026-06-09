@@ -17,35 +17,37 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, async (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
-  }
-
-  logger.info({ port }, "Server listening");
-
-  // Initialize MongoDB: create indexes + ensure bot_state singleton
+// ── MongoDB init with background retry (non-fatal) ──────────────────────────
+async function initMongoWithRetry(attempt = 1): Promise<void> {
   try {
     await initMongo();
     logger.info("MongoDB initialized (indexes + bot_state singleton ensured)");
+
+    // Only start engine + sync after MongoDB is ready
+    try {
+      await engineInit();
+    } catch (e) {
+      logger.error({ err: e }, "Failed to initialize bot engine");
+    }
+
+    startAutoSync();
+
+    setInterval(() => {
+      cleanupIdleClients().catch((e) =>
+        logger.error({ err: e }, "Client cleanup error"),
+      );
+    }, 30 * 60_000);
   } catch (e) {
-    logger.error({ err: e }, "Failed to initialize MongoDB");
-    process.exit(1);
+    const delaySecs = Math.min(30 * attempt, 120);
+    logger.error(
+      { err: e, attempt, retryInSecs: delaySecs },
+      "Failed to initialize MongoDB — retrying",
+    );
+    setTimeout(() => initMongoWithRetry(attempt + 1), delaySecs * 1000);
   }
+}
 
-  // Initialize the bot engine (resumes if it was running before restart)
-  try {
-    await engineInit();
-  } catch (e) {
-    logger.error({ err: e }, "Failed to initialize bot engine");
-  }
-
-  // Start MongoDB auto-sync (runs every 30 min by default)
-  startAutoSync();
-
-  // Clean up idle Telegram clients every 30 minutes
-  setInterval(() => {
-    cleanupIdleClients().catch((e) => logger.error({ err: e }, "Client cleanup error"));
-  }, 30 * 60_000);
+app.listen(port, () => {
+  logger.info({ port }, "Server listening");
+  initMongoWithRetry();
 });

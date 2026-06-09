@@ -1,7 +1,6 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
-import { createRequire } from "module";
 import path from "path";
 import { fileURLToPath } from "url";
 import router from "./routes";
@@ -34,9 +33,14 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ── Deployment healthcheck — always 200, no DB dependency ───────────────────
+app.get("/api", (_req, res) => {
+  res.json({ status: "ok" });
+});
+
 app.use("/api", router);
 
-// ── Serve dashboard static files in production ──
+// ── Serve dashboard static files in production ──────────────────────────────
 if (process.env.NODE_ENV === "production") {
   const dashboardDist = path.resolve(__dirname, "../../dashboard/dist/public");
   app.use(express.static(dashboardDist));

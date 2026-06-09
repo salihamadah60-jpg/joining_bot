@@ -31,7 +31,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "fuser -k 5000/tcp 8080/tcp 2>/dev/null; pnpm --filter @workspace/api-server run build && PORT=8080 pnpm --filter @workspace/api-server run start & PORT=5000 BASE_PATH=/ pnpm --filter @workspace/dashboard run dev & pnpm --filter @workspace/scripts run auto-sync & wait"
+args = "fuser -k 5000/tcp 2>/dev/null; PORT=5000 BASE_PATH=/ pnpm --filter @workspace/dashboard run dev"
 waitForPort = 5000
 
 [agent]
