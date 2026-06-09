@@ -1,8 +1,7 @@
 /**
- * EVENT BUS — P2-5: Real-time Notifications
- *
- * A simple in-process EventEmitter that the bot engine publishes to,
- * and SSE clients subscribe to. No external broker needed.
+ * EVENT BUS — Real-time Notifications + Sync Progress
+ * A simple in-process EventEmitter that the bot engine + sync publish to,
+ * and SSE clients subscribe to.
  */
 
 import { EventEmitter } from "events";
@@ -17,7 +16,10 @@ export type BotEventType =
   | "join_success"
   | "join_failed"
   | "engine_started"
-  | "engine_stopped";
+  | "engine_stopped"
+  | "sync_progress"
+  | "sync_complete"
+  | "sync_error";
 
 export interface BotEvent {
   type: BotEventType;
@@ -26,6 +28,14 @@ export interface BotEvent {
   linkUrl?: string;
   waitSeconds?: number;
   timestamp: string;
+  // Sync-specific fields
+  collectionId?: string;
+  collectionName?: string;
+  total?: number;
+  processed?: number;
+  synced?: number;
+  duplicates?: number;
+  errors?: number;
 }
 
 class BotEventBus extends EventEmitter {
@@ -43,16 +53,14 @@ class BotEventBus extends EventEmitter {
     return super.emit(event, ...args);
   }
 
-  /** Return the last N events (for new SSE connections to catch up). */
   getRecent(n = 20): BotEvent[] {
     return this.recent.slice(-n);
   }
 
-  /** Publish a new event to all SSE subscribers. */
   publish(event: BotEvent): void {
     this.emit("bot_event", event);
   }
 }
 
 export const eventBus = new BotEventBus();
-eventBus.setMaxListeners(200); // allow many SSE connections
+eventBus.setMaxListeners(200);

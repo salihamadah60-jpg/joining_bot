@@ -2,16 +2,18 @@ import { Router, type IRouter } from "express";
 import { ObjectId } from "mongodb";
 import { collections } from "@workspace/db";
 import { logger } from "../lib/logger.js";
+import { eventBus } from "../lib/eventBus.js";
 
 const router: IRouter = Router();
 
 function extractUrlFromDoc(doc: Record<string, any>, linkField: string): string | null {
   const configured = linkField?.trim();
-  if (configured && typeof doc[configured] === "string" && doc[configured].includes("t.me")) {
-    return doc[configured];
+  if (configured && typeof doc[configured] === "string" && doc[configured].length > 3) {
+    const v = doc[configured];
+    if (v.includes("t.me") || v.startsWith("@") || v.startsWith("http")) return v;
   }
   for (const val of Object.values(doc)) {
-    if (typeof val === "string" && val.includes("t.me/")) {
+    if (typeof val === "string" && (val.includes("t.me/") || val.startsWith("@"))) {
       return val;
     }
   }
@@ -21,7 +23,8 @@ function extractUrlFromDoc(doc: Record<string, any>, linkField: string): string 
 function normaliseUrl(raw: string): string {
   let url = raw.trim().replace(/[,;.،؛\s]+$/, "");
   if (url.startsWith("@")) return `https://t.me/${url.slice(1)}`;
-  if (!url.startsWith("http")) return `https://${url}`;
+  if (url.startsWith("t.me")) return `https://${url}`;
+  if (!url.startsWith("http")) return `https://t.me/${url}`;
   return url;
 }
 
@@ -34,7 +37,7 @@ function serializeCollection(c: any) {
     linkField: c.linkField,
     isActive: c.isActive ?? true,
     lastSyncAt: c.lastSyncAt ? new Date(c.lastSyncAt).toISOString() : null,
-    syncedCount: c.syncedCount ?? 0,
+    syncedCount: c.totalInQueue ?? c.syncedCount ?? 0,
     createdAt: c.createdAt ? new Date(c.createdAt).toISOString() : new Date().toISOString(),
     updatedAt: c.updatedAt ? new Date(c.updatedAt).toISOString() : new Date().toISOString(),
   };
@@ -43,7 +46,17 @@ function serializeCollection(c: any) {
 router.get("/collections", async (req, res): Promise<void> => {
   const col = await collections.mongoCollections();
   const docs = await col.find({}).sort({ createdAt: 1 }).toArray();
-  res.json(docs.map(serializeCollection));
+  const targetLinksCol = await collections.targetLinks();
+
+  // Count actual links in queue per collection source
+  const withCounts = await Promise.all(
+    docs.map(async (doc) => {
+      const totalInQueue = await targetLinksCol.countDocuments({ source: doc.name });
+      return { ...doc, totalInQueue };
+    })
+  );
+
+  res.json(withCounts.map(serializeCollection));
 });
 
 router.post("/collections", async (req, res): Promise<void> => {
@@ -100,6 +113,7 @@ router.delete("/collections/:id", async (req, res): Promise<void> => {
   res.sendStatus(204);
 });
 
+// ─── Background sync — returns immediately, emits progress via SSE ────────────
 router.post("/collections/:id/sync", async (req, res): Promise<void> => {
   const id = req.params["id"];
   if (!id || !ObjectId.isValid(id)) { res.status(400).json({ error: "Invalid id" }); return; }
@@ -107,60 +121,175 @@ router.post("/collections/:id/sync", async (req, res): Promise<void> => {
   const collection = await col.findOne({ _id: new ObjectId(id) });
   if (!collection) { res.status(404).json({ error: "Collection not found" }); return; }
 
-  let synced = 0;
-  let duplicates = 0;
-  let errors = 0;
+  // Return immediately — sync runs in background
+  res.json({ ok: true, background: true, message: "Sync started in background" });
+
+  // Run sync without awaiting — progress emitted via SSE
+  runSyncBackground(collection, id).catch((err) => {
+    logger.error({ err, collectionId: id }, "Background sync crashed");
+    eventBus.publish({
+      type: "sync_error",
+      collectionId: id,
+      collectionName: collection.name,
+      message: `❌ فشل Sync: ${String(err)}`,
+      timestamp: new Date().toISOString(),
+    });
+  });
+});
+
+async function runSyncBackground(collection: any, id: string): Promise<void> {
+  const ts = () => new Date().toISOString();
+  const name = collection.name;
+
+  eventBus.publish({
+    type: "sync_progress",
+    collectionId: id,
+    collectionName: name,
+    message: `🔌 الاتصال بـ MongoDB...`,
+    total: 0,
+    processed: 0,
+    timestamp: ts(),
+  });
+
+  const { MongoClient } = await import("mongodb");
+  const client = new MongoClient(collection.connectionString, {
+    serverSelectionTimeoutMS: 20_000,
+    connectTimeoutMS: 20_000,
+  });
 
   try {
-    const { MongoClient } = await import("mongodb");
-    const client = new MongoClient(collection.connectionString);
     await client.connect();
-    try {
-      const mongoDb = client.db(collection.dbName);
-      const extCol = mongoDb.collection(collection.name);
-      const docs = await extCol.find({}).limit(10000).toArray();
 
+    eventBus.publish({
+      type: "sync_progress",
+      collectionId: id,
+      collectionName: name,
+      message: `📥 جاري جلب الوثائق من "${name}"...`,
+      total: 0,
+      processed: 0,
+      timestamp: ts(),
+    });
+
+    const mongoDb = client.db(collection.dbName);
+    const extCol = mongoDb.collection(collection.name);
+    const docs = await extCol.find({}).limit(10_000).toArray();
+    const total = docs.length;
+
+    logger.info({ collection: name, fetched: total }, "Fetched docs for manual sync");
+
+    eventBus.publish({
+      type: "sync_progress",
+      collectionId: id,
+      collectionName: name,
+      message: `📦 جُلب ${total.toLocaleString()} وثيقة — جاري المعالجة...`,
+      total,
+      processed: 0,
+      timestamp: ts(),
+    });
+
+    // Extract and normalise URLs
+    const urls: string[] = [];
+    for (const doc of docs) {
+      const rawUrl = extractUrlFromDoc(doc as Record<string, any>, collection.linkField);
+      if (!rawUrl) continue;
+      urls.push(normaliseUrl(rawUrl));
+    }
+
+    const validCount = urls.length;
+
+    eventBus.publish({
+      type: "sync_progress",
+      collectionId: id,
+      collectionName: name,
+      message: `🔗 ${validCount.toLocaleString()} رابط صالح — جاري الإدراج...`,
+      total,
+      processed: validCount,
+      timestamp: ts(),
+    });
+
+    let synced = 0;
+    let duplicates = 0;
+    let errors = 0;
+
+    if (validCount > 0) {
       const targetLinksCol = await collections.targetLinks();
-      for (const doc of docs) {
-        const rawUrl = extractUrlFromDoc(doc as Record<string, any>, collection.linkField);
-        if (!rawUrl) continue;
-        const url = normaliseUrl(rawUrl);
-        try {
-          await targetLinksCol.insertOne({
+      const now = new Date();
+      const bulkOps = urls.map((url) => ({
+        insertOne: {
+          document: {
             _id: new ObjectId(),
             url,
             status: "pending",
             failReason: null,
             groupTitle: null,
             groupType: null,
-            source: collection.name,
+            source: name,
             usedByAccountPhone: null,
             retryCount: 0,
             retryAfter: null,
-            createdAt: new Date(),
+            createdAt: now,
             processedAt: null,
-          });
-          synced++;
-        } catch (e: any) {
-          if (e.code === 11000) { duplicates++; } else { errors++; }
+          },
+        },
+      }));
+
+      try {
+        const result = await targetLinksCol.bulkWrite(bulkOps, { ordered: false });
+        synced = result.insertedCount;
+        const writeErrors: any[] = (result as any).getWriteErrors?.() ?? [];
+        for (const e of writeErrors) {
+          if (e.code === 11000) duplicates++;
+          else errors++;
+        }
+      } catch (bulkErr: any) {
+        if (bulkErr?.result) {
+          synced = bulkErr.result.nInserted ?? 0;
+          const writeErrors: any[] = bulkErr.result.getWriteErrors?.() ?? [];
+          for (const e of writeErrors) {
+            if (e.code === 11000) duplicates++;
+            else errors++;
+          }
+        } else {
+          errors = validCount;
+          logger.error({ err: bulkErr?.message, collection: name }, "BulkWrite failed");
         }
       }
-    } finally {
-      await client.close();
     }
 
+    // Update collection metadata
+    const col = await collections.mongoCollections();
     await col.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { lastSyncAt: new Date(), syncedCount: (collection.syncedCount ?? 0) + synced, updatedAt: new Date() } }
+      { _id: collection._id },
+      {
+        $set: {
+          lastSyncAt: new Date(),
+          syncedCount: (collection.syncedCount ?? 0) + synced,
+          updatedAt: new Date(),
+        },
+      }
     );
-  } catch (e) {
-    logger.error({ err: e }, "MongoDB sync failed");
-    res.status(500).json({ error: String(e) });
-    return;
-  }
 
-  logger.info({ collection: collection.name, synced, duplicates, errors }, "Collection sync complete");
-  res.json({ synced, duplicates, errors });
-});
+    logger.info({ collection: name, synced, duplicates, errors }, "Manual sync complete");
+
+    eventBus.publish({
+      type: "sync_complete",
+      collectionId: id,
+      collectionName: name,
+      synced,
+      duplicates,
+      errors,
+      total,
+      processed: validCount,
+      message: `✅ ${name}: ${synced.toLocaleString()} جديد — ${duplicates.toLocaleString()} مكرر`,
+      timestamp: ts(),
+    });
+
+  } catch (err: any) {
+    logger.error({ err, collection: name }, "Sync background failed");
+    throw err;
+  } finally {
+    await client.close();
+  }
+}
 
 export default router;
