@@ -12,6 +12,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { useMutation } from "@tanstack/react-query";
+import type { AlreadyJoinedEntry } from "@workspace/api-client-react";
 
 export default function Links() {
   const queryClient = useQueryClient();
@@ -28,28 +29,25 @@ export default function Links() {
 
   const [isBulkOpen, setIsBulkOpen] = useState(false);
   const [bulkUrls, setBulkUrls] = useState("");
-  const [joinedFeedback, setJoinedFeedback] = useState<string[]>([]);
+  const [joinedFeedback, setJoinedFeedback] = useState<AlreadyJoinedEntry[]>([]);
   const [isJoinedDialogOpen, setIsJoinedDialogOpen] = useState(false);
 
   const handleBulkAdd = () => {
     if (!bulkUrls.trim()) return;
 
     bulkAddLinks.mutate({ data: { urls: [bulkUrls] } }, {
-      onSuccess: (data: any) => {
+      onSuccess: (data) => {
         queryClient.invalidateQueries({ queryKey: ["/api/links"] });
         setIsBulkOpen(false);
         setBulkUrls("");
 
-        const extracted = data.extracted ?? data.total ?? 0;
+        const extracted = (data as any).extracted ?? data.total ?? 0;
         const alreadyJoined = data.alreadyJoined ?? 0;
-        const alreadyJoinedUrls: string[] = data.alreadyJoinedUrls ?? [];
+        const alreadyJoinedUrls: AlreadyJoinedEntry[] = (data.alreadyJoinedUrls as AlreadyJoinedEntry[] | undefined) ?? [];
 
         let description = `${extracted} رابط استُخرج — ${data.added} جديد — ${data.duplicates ?? 0} مكرر`;
         if (alreadyJoined > 0) {
           description += ` — ${alreadyJoined} تم الانضمام سابقاً`;
-        }
-        if (data.errors) {
-          description += ` — ${data.errors} خطأ`;
         }
 
         toast({
@@ -163,11 +161,14 @@ export default function Links() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground mb-2">
-            هذه الروابط موجودة مسبقاً في سجل JOINED — تم الانضمام إليها من قبل:
+            هذه الروابط موجودة في سجل JOINED — تم الانضمام إليها مسبقاً:
           </p>
-          <div className="max-h-[300px] overflow-y-auto rounded border border-card-border bg-background p-3 space-y-1 font-mono text-xs">
-            {joinedFeedback.map((url) => (
-              <div key={url} className="text-muted-foreground truncate">{url}</div>
+          <div className="max-h-[320px] overflow-y-auto rounded border border-card-border bg-background p-3 space-y-2 font-mono text-xs">
+            {joinedFeedback.map((entry) => (
+              <div key={entry.url} className="flex flex-col gap-0.5 border-b border-card-border/50 pb-2 last:border-0 last:pb-0">
+                <span className="text-foreground truncate">{entry.url}</span>
+                <span className="text-primary">تم الانضمام سابقاً من الحساب: {entry.accountPhone}</span>
+              </div>
             ))}
           </div>
           <DialogFooter>

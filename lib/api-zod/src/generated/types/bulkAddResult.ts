@@ -5,6 +5,7 @@
  * Telegram Multi-Account Bot Manager API
  * OpenAPI spec version: 0.3.0
  */
+import type { AlreadyJoinedEntry } from './alreadyJoinedEntry';
 
 export interface BulkAddResult {
   /** Number of new links added to TARGET_LINKS */
@@ -13,8 +14,8 @@ export interface BulkAddResult {
   duplicates: number;
   /** Number of links already recorded in JOINED collection */
   alreadyJoined?: number;
-  /** URLs that were already joined (for user feedback) */
-  alreadyJoinedUrls?: string[];
+  /** URLs that were already joined, with the account that joined them */
+  alreadyJoinedUrls?: AlreadyJoinedEntry[];
   /** Total URLs extracted from input */
   total: number;
   /** Total t.me URLs extracted from raw text */

@@ -780,8 +780,8 @@ components:
         alreadyJoinedUrls:
           type: array
           items:
-            type: string
-          description: URLs that were already joined (for user feedback)
+            $ref: "#/components/schemas/AlreadyJoinedEntry"
+          description: URLs that were already joined, with the account that joined them
         total:
           type: integer
           description: Total URLs extracted from input
@@ -926,6 +926,16 @@ components:
       additionalProperties:
         type: string
       description: Flat key→value map of settings
+
+    AlreadyJoinedEntry:
+      type: object
+      required: [url, accountPhone]
+      properties:
+        url:
+          type: string
+        accountPhone:
+          type: string
+          description: Phone number of the account that previously joined this link
 
     TelegramCredentialStatus:
       type: object

@@ -14,6 +14,7 @@ export * from './accountUpdate';
 export * from './accountUpdateStatus';
 export * from './activityEntry';
 export * from './activityEntryType';
+export * from './alreadyJoinedEntry';
 export * from './authCancel200';
 export * from './authCancelBody';
 export * from './authSendCodeRequest';

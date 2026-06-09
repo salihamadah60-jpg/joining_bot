@@ -200,6 +200,12 @@ export interface BulkLinksInput {
   source?: string;
 }
 
+export interface AlreadyJoinedEntry {
+  url: string;
+  /** Phone number of the account that previously joined this link */
+  accountPhone: string;
+}
+
 export interface BulkAddResult {
   /** Number of new links added to TARGET_LINKS */
   added: number;
@@ -207,8 +213,8 @@ export interface BulkAddResult {
   duplicates: number;
   /** Number of links already recorded in JOINED collection */
   alreadyJoined?: number;
-  /** URLs that were already joined (for user feedback) */
-  alreadyJoinedUrls?: string[];
+  /** URLs that were already joined, with the account that joined them */
+  alreadyJoinedUrls?: AlreadyJoinedEntry[];
   /** Total URLs extracted from input */
   total: number;
   /** Total t.me URLs extracted from raw text */
