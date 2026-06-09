@@ -3,7 +3,7 @@
  *
  * Periodically syncs all active external MongoDB collections into TARGET_LINKS.
  * Default interval: 30 minutes.
- * Uses mongo_collections collection for config (instead of PostgreSQL).
+ * Uses bulkWrite (unordered) for efficient batch inserts — handles 10k+ docs fast.
  */
 
 import { ObjectId } from "mongodb";
@@ -46,23 +46,32 @@ export async function syncOne(
   try {
     const { MongoClient } = await import("mongodb");
     const client = new MongoClient(collection.connectionString, {
-      serverSelectionTimeoutMS: 10_000,
-      connectTimeoutMS: 10_000,
+      serverSelectionTimeoutMS: 15_000,
+      connectTimeoutMS: 15_000,
     });
     await client.connect();
 
     try {
       const mongoDb = client.db(collection.dbName);
       const extCol = mongoDb.collection(collection.name);
-      const docs = await extCol.find({}).limit(10000).toArray();
-      const targetLinksCol = await collections.targetLinks();
+
+      // Fetch up to 10k docs — covers 6500+ links easily
+      const docs = await extCol.find({}).limit(10_000).toArray();
+      logger.info({ collection: collection.name, fetched: docs.length }, "Fetched docs from external collection");
+
+      // ─── Build normalized URL list ─────────────────────────────────────────
+      const urls: string[] = [];
+      const configuredField = collection.linkField?.trim();
 
       for (const doc of docs) {
         let rawUrl: string | null = null;
-        const configuredField = collection.linkField?.trim();
+
+        // 1. Try configured field first
         if (configuredField && typeof doc[configuredField] === "string") {
           rawUrl = doc[configuredField];
         }
+
+        // 2. Fallback: scan all string values for t.me / @ handles
         if (!rawUrl || (!rawUrl.includes("t.me") && !rawUrl.startsWith("@") && !rawUrl.startsWith("http"))) {
           for (const val of Object.values(doc)) {
             if (typeof val === "string" && (val.includes("t.me/") || val.startsWith("@"))) {
@@ -71,41 +80,82 @@ export async function syncOne(
             }
           }
         }
+
         if (!rawUrl) continue;
+
         let url = rawUrl.trim().replace(/[,;.،؛\s]+$/, "");
         if (!url.startsWith("http") && !url.startsWith("t.me") && !url.startsWith("@")) continue;
         if (url.startsWith("@")) url = `https://t.me/${url.slice(1)}`;
         else if (url.startsWith("t.me")) url = `https://${url}`;
 
+        urls.push(url);
+      }
+
+      if (urls.length === 0) {
+        logger.info({ collection: collection.name }, "No valid Telegram links found in collection");
+      } else {
+        // ─── Bulk insert — ordered:false so duplicates don't halt the batch ──
+        const targetLinksCol = await collections.targetLinks();
+        const now = new Date();
+
+        const bulkOps = urls.map((url) => ({
+          insertOne: {
+            document: {
+              _id: new ObjectId(),
+              url,
+              status: "pending",
+              failReason: null,
+              groupTitle: null,
+              groupType: null,
+              source: collection.name,
+              usedByAccountPhone: null,
+              retryCount: 0,
+              retryAfter: null,
+              createdAt: now,
+              processedAt: null,
+            },
+          },
+        }));
+
         try {
-          await targetLinksCol.insertOne({
-            _id: new ObjectId(),
-            url,
-            status: "pending",
-            failReason: null,
-            groupTitle: null,
-            groupType: null,
-            source: collection.name,
-            usedByAccountPhone: null,
-            retryCount: 0,
-            retryAfter: null,
-            createdAt: new Date(),
-            processedAt: null,
-          });
-          synced++;
-        } catch (e: any) {
-          if (e?.code === 11000) { duplicates++; }
-          else { errors++; logger.warn({ url, err: e?.message }, "Failed to insert link during sync"); }
+          const result = await targetLinksCol.bulkWrite(bulkOps, { ordered: false });
+          synced = result.insertedCount;
+          // writeErrors contains duplicates (code 11000) and real errors
+          const writeErrors = (result as any).getWriteErrors?.() ?? [];
+          for (const e of writeErrors) {
+            if (e.code === 11000) duplicates++;
+            else errors++;
+          }
+        } catch (bulkErr: any) {
+          // BulkWriteError thrown when ordered:false still has errors
+          if (bulkErr?.result) {
+            synced = bulkErr.result.nInserted ?? 0;
+            const writeErrors = bulkErr.result.getWriteErrors?.() ?? [];
+            for (const e of writeErrors) {
+              if (e.code === 11000) duplicates++;
+              else errors++;
+            }
+          } else {
+            errors++;
+            logger.error({ err: bulkErr?.message, collection: collection.name }, "Bulk insert failed");
+          }
         }
       }
     } finally {
       await client.close();
     }
 
+    // Update collection metadata
     const col = await collections.mongoCollections();
     await col.updateOne(
       { _id: collection._id },
-      { $set: { lastSyncAt: new Date(), syncedCount: (collection.syncedCount ?? 0) + synced, updatedAt: new Date() } }
+      {
+        $set: {
+          lastSyncAt: new Date(),
+          syncedCount: (collection.syncedCount ?? 0) + synced,
+          updatedAt: new Date(),
+        },
+      }
     );
 
     logger.info({ collection: collection.name, synced, duplicates, errors }, "Collection sync complete");
@@ -115,7 +165,7 @@ export async function syncOne(
       await activityCol.insertOne({
         _id: new ObjectId(),
         type: "sync_completed",
-        message: `🔄 تزامن تلقائي: ${collection.name} — ${synced} رابط جديد, ${duplicates} مكرر`,
+        message: `🔄 تزامن: ${collection.name} — ${synced} رابط جديد, ${duplicates} مكرر`,
         accountPhone: null,
         linkUrl: null,
         errorCode: null,

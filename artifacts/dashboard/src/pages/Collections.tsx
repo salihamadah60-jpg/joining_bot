@@ -21,6 +21,73 @@ const EMPTY_FORM: FormData = {
   linkField: "url",
 };
 
+// ─── CollectionForm is defined OUTSIDE the parent to prevent remount on each keystroke ───
+interface CollectionFormProps {
+  formData: FormData;
+  setFormData: React.Dispatch<React.SetStateAction<FormData>>;
+  onSave: () => void;
+  loading: boolean;
+}
+
+function CollectionForm({ formData, setFormData, onSave, loading }: CollectionFormProps) {
+  return (
+    <div className="space-y-4 py-4 font-mono">
+      <div className="space-y-2">
+        <Label>اسم الكولكشن (كما هو في MongoDB تماماً)</Label>
+        <Input
+          value={formData.name}
+          onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
+          placeholder="global_links_telegram"
+          className="bg-background border-input"
+        />
+        <p className="text-xs text-muted-foreground">انتبه للإملاء — يجب أن يكون مطابقاً تماماً</p>
+      </div>
+      <div className="space-y-2">
+        <Label>MongoDB Connection String</Label>
+        <Input
+          value={formData.connectionString}
+          onChange={e => setFormData(prev => ({ ...prev, connectionString: e.target.value }))}
+          placeholder="mongodb+srv://user:pass@cluster.mongodb.net"
+          type="password"
+          className="bg-background border-input"
+        />
+      </div>
+      <div className="space-y-2">
+        <Label>اسم قاعدة البيانات</Label>
+        <Input
+          value={formData.dbName}
+          onChange={e => setFormData(prev => ({ ...prev, dbName: e.target.value }))}
+          placeholder="Joining_links"
+          className="bg-background border-input"
+        />
+      </div>
+      <div className="space-y-2">
+        <Label>اسم الحقل الذي يحتوي الرابط</Label>
+        <Input
+          value={formData.linkField}
+          onChange={e => setFormData(prev => ({ ...prev, linkField: e.target.value }))}
+          placeholder="url"
+          className="bg-background border-input"
+        />
+        <p className="text-xs text-muted-foreground">
+          إذا كنت غير متأكد اترك <code>url</code> — السيرفر يبحث تلقائياً عن أي حقل يحتوي t.me
+        </p>
+      </div>
+      <DialogFooter>
+        <Button
+          onClick={onSave}
+          disabled={!formData.name || !formData.connectionString || !formData.dbName || loading}
+          className="font-mono w-full"
+        >
+          {loading ? "جاري الحفظ..." : "SAVE_CONFIGURATION"}
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function Collections() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -103,61 +170,6 @@ export default function Collections() {
     });
   };
 
-  const CollectionForm = ({ onSave, loading }: { onSave: () => void; loading: boolean }) => (
-    <div className="space-y-4 py-4 font-mono">
-      <div className="space-y-2">
-        <Label>اسم المجموعة (الكولكشن بالضبط كما هو في MongoDB)</Label>
-        <Input
-          value={formData.name}
-          onChange={e => setFormData({ ...formData, name: e.target.value })}
-          placeholder="global_links_telegram"
-          className="bg-background border-input"
-        />
-        <p className="text-xs text-muted-foreground">انتبه للإملاء — يجب أن يكون اسم الكولكشن مطابقاً تماماً</p>
-      </div>
-      <div className="space-y-2">
-        <Label>MongoDB Connection String</Label>
-        <Input
-          value={formData.connectionString}
-          onChange={e => setFormData({ ...formData, connectionString: e.target.value })}
-          placeholder="mongodb+srv://user:pass@cluster.mongodb.net"
-          type="password"
-          className="bg-background border-input"
-        />
-      </div>
-      <div className="space-y-2">
-        <Label>اسم قاعدة البيانات</Label>
-        <Input
-          value={formData.dbName}
-          onChange={e => setFormData({ ...formData, dbName: e.target.value })}
-          placeholder="Joining_links"
-          className="bg-background border-input"
-        />
-      </div>
-      <div className="space-y-2">
-        <Label>اسم الحقل الذي يحتوي الرابط</Label>
-        <Input
-          value={formData.linkField}
-          onChange={e => setFormData({ ...formData, linkField: e.target.value })}
-          placeholder="url"
-          className="bg-background border-input"
-        />
-        <p className="text-xs text-muted-foreground">
-          إذا كنت غير متأكد اترك <code>url</code> — السيرفر يبحث تلقائياً عن أي حقل يحتوي t.me
-        </p>
-      </div>
-      <DialogFooter>
-        <Button
-          onClick={onSave}
-          disabled={!formData.name || !formData.connectionString || !formData.dbName || loading}
-          className="font-mono w-full"
-        >
-          {loading ? "جاري الحفظ..." : "SAVE_CONFIGURATION"}
-        </Button>
-      </DialogFooter>
-    </div>
-  );
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -174,7 +186,7 @@ export default function Collections() {
             <DialogHeader>
               <DialogTitle className="font-mono">CONFIGURE_MONGO_SOURCE</DialogTitle>
             </DialogHeader>
-            <CollectionForm onSave={handleAdd} loading={addCollection.isPending} />
+            <CollectionForm formData={formData} setFormData={setFormData} onSave={handleAdd} loading={addCollection.isPending} />
           </DialogContent>
         </Dialog>
       </div>
@@ -185,7 +197,7 @@ export default function Collections() {
           <DialogHeader>
             <DialogTitle className="font-mono">EDIT_SOURCE</DialogTitle>
           </DialogHeader>
-          <CollectionForm onSave={handleEdit} loading={editMutation.isPending} />
+          <CollectionForm formData={formData} setFormData={setFormData} onSave={handleEdit} loading={editMutation.isPending} />
         </DialogContent>
       </Dialog>
 
@@ -217,7 +229,7 @@ export default function Collections() {
                   <TableCell className="text-right text-muted-foreground">
                     <div>{col.lastSyncAt ? formatDistanceToNow(new Date(col.lastSyncAt), { addSuffix: true }) : 'NEVER'}</div>
                     {col.syncedCount !== undefined && (
-                      <div className="text-xs text-primary">{col.syncedCount} records</div>
+                      <div className="text-xs text-primary">{col.syncedCount.toLocaleString()} records</div>
                     )}
                   </TableCell>
                   <TableCell className="text-right">
