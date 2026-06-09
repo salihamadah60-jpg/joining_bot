@@ -44,7 +44,7 @@ app.use("/api", router);
 if (process.env.NODE_ENV === "production") {
   const dashboardDist = path.resolve(__dirname, "../../dashboard/dist/public");
   app.use(express.static(dashboardDist));
-  app.get("*", (_req, res) => {
+  app.get("*splat", (_req, res) => {
     res.sendFile(path.join(dashboardDist, "index.html"));
   });
 }

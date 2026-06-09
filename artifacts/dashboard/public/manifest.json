@@ -1,0 +1,21 @@
+{
+  "name": "TG Rotator — لوحة التحكم",
+  "short_name": "TG Rotator",
+  "description": "إدارة حسابات تيليجرام للانضمام التلقائي للمجموعات",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#1e2a3a",
+  "theme_color": "#00b8c4",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "utilities"]
+}

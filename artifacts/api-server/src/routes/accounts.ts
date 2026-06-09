@@ -171,19 +171,33 @@ router.post("/accounts/:id/sync-dialogs", async (req, res): Promise<void> => {
 
   let count = 0;
   try {
-    const dialogs = (client as any).getDialogs
-      ? (client as any).getDialogs({ limit: 600 })
-      : null;
-    if (dialogs) {
-      for await (const _ of dialogs) {
-        count++;
-        if (count >= 600) break;
+    // @mtcute getDialogs returns Promise<Dialog[]> — must await, then use .length
+    if (typeof (client as any).getDialogs === "function") {
+      const dialogs = await (client as any).getDialogs({ limit: 500 });
+      if (Array.isArray(dialogs)) {
+        count = dialogs.length;
       }
     }
+    // Fallback: if getDialogs not available or returned nothing, count from our join records
+    if (count === 0) {
+      const targetCol = await collections.targetLinks();
+      count = await targetCol.countDocuments({
+        usedByAccountPhone: account.phone,
+        status: "joined",
+      });
+    }
   } catch (err) {
-    logger.warn({ err, phone: account.phone }, "Could not iterate dialogs");
-    res.json({ channelsCount: account.channelsCount, synced: false, note: "تعذّر جلب القائمة من تيليجرام" });
-    return;
+    logger.warn({ err, phone: account.phone }, "Could not fetch dialogs from Telegram, falling back to DB count");
+    // Fall back to counting joined links from our records
+    try {
+      const targetCol = await collections.targetLinks();
+      count = await targetCol.countDocuments({
+        usedByAccountPhone: account.phone,
+        status: "joined",
+      });
+    } catch (_) {
+      count = account.channelsCount ?? 0;
+    }
   }
 
   await col.updateOne({ _id: new ObjectId(id) }, { $set: { channelsCount: count, updatedAt: new Date() } });
