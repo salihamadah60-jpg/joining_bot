@@ -135,10 +135,15 @@ let _db: Db | null = null;
 
 function extractDbName(url: string): string {
   try {
-    // mongodb+srv://user:pass@host/dbname?options  OR  mongodb://host/dbname
-    const match = url.match(/\/([^/?#]+)(\?|$)/);
-    if (match && match[1] && match[1] !== "" && !match[1].includes("mongodb")) {
-      return match[1];
+    // Normalize mongodb+srv:// and mongodb:// to https:// so URL parser can handle them
+    const normalized = url
+      .replace(/^mongodb\+srv:\/\//, "https://")
+      .replace(/^mongodb:\/\//, "https://");
+    const parsed = new URL(normalized);
+    // pathname is "/dbname" or "/" or ""
+    const dbName = parsed.pathname.slice(1).split("?")[0].trim();
+    if (dbName && !dbName.includes(".") && dbName !== "") {
+      return dbName;
     }
   } catch {}
   return "Joining_links";

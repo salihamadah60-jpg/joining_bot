@@ -50,59 +50,59 @@
 }
 
 :root, .dark {
-  --button-outline: rgba(255,255,255, .10);
-  --badge-outline: rgba(255,255,255, .05);
+  --button-outline: rgba(255,255,255, .12);
+  --badge-outline: rgba(255,255,255, .07);
 
   --opaque-button-border-intensity: 9;
 
-  --elevate-1: rgba(255,255,255, .04);
-  --elevate-2: rgba(255,255,255, .09);
+  --elevate-1: rgba(255,255,255, .05);
+  --elevate-2: rgba(255,255,255, .10);
 
-  /* Deep navy/slate background */
-  --background: 222 47% 11%;
-  --foreground: 210 40% 98%;
+  /* Brighter slate-blue background */
+  --background: 222 30% 18%;
+  --foreground: 210 40% 96%;
 
-  --border: 217 33% 17%;
-  
-  --card: 223 47% 14%;
-  --card-foreground: 210 40% 98%;
-  --card-border: 217 33% 17%;
+  --border: 217 28% 30%;
 
-  --sidebar: 223 47% 14%;
-  --sidebar-foreground: 210 40% 98%;
-  --sidebar-border: 217 33% 17%;
-  --sidebar-primary: 183 100% 35%;
-  --sidebar-primary-foreground: 222 47% 11%;
-  --sidebar-accent: 217 33% 17%;
-  --sidebar-accent-foreground: 210 40% 98%;
-  --sidebar-ring: 183 100% 35%;
+  --card: 222 28% 23%;
+  --card-foreground: 210 40% 96%;
+  --card-border: 217 28% 30%;
 
-  --popover: 223 47% 14%;
-  --popover-foreground: 210 40% 98%;
-  --popover-border: 217 33% 17%;
+  --sidebar: 222 28% 21%;
+  --sidebar-foreground: 210 40% 96%;
+  --sidebar-border: 217 28% 30%;
+  --sidebar-primary: 183 100% 38%;
+  --sidebar-primary-foreground: 222 30% 12%;
+  --sidebar-accent: 217 28% 28%;
+  --sidebar-accent-foreground: 210 40% 96%;
+  --sidebar-ring: 183 100% 38%;
 
-  /* Cyan/teal accent */
-  --primary: 183 100% 35%;
-  --primary-foreground: 222 47% 11%;
+  --popover: 222 28% 23%;
+  --popover-foreground: 210 40% 96%;
+  --popover-border: 217 28% 30%;
 
-  --secondary: 217 33% 17%;
-  --secondary-foreground: 210 40% 98%;
+  /* Brighter cyan/teal accent */
+  --primary: 183 100% 38%;
+  --primary-foreground: 222 30% 12%;
 
-  --muted: 217 33% 17%;
-  --muted-foreground: 215 20.2% 65.1%;
+  --secondary: 217 28% 28%;
+  --secondary-foreground: 210 40% 96%;
 
-  --accent: 217 33% 17%;
-  --accent-foreground: 210 40% 98%;
+  --muted: 217 28% 27%;
+  --muted-foreground: 215 20% 74%;
 
-  --destructive: 0 84.2% 60.2%;
+  --accent: 217 28% 28%;
+  --accent-foreground: 210 40% 96%;
+
+  --destructive: 0 84.2% 62%;
   --destructive-foreground: 210 40% 98%;
 
-  --input: 217 33% 17%;
-  --ring: 183 100% 35%;
+  --input: 217 28% 27%;
+  --ring: 183 100% 38%;
 
   --app-font-sans: 'Inter', sans-serif;
   --app-font-mono: 'JetBrains Mono', monospace;
-  --radius: 0.25rem; 
+  --radius: 0.375rem;
 
   --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
   --sidebar-accent-border: hsl(from hsl(var(--sidebar-accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);

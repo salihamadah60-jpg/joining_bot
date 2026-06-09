@@ -1,13 +1,17 @@
 import { useState, useEffect } from "react";
 import { useGetSettings, useGetTelegramStatus, useUpdateSettings } from "@workspace/api-client-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Settings2, Key, ShieldCheck, ShieldX, Save, Eye, EyeOff, Moon, Bot, DatabaseBackup, RefreshCw, Upload, Download } from "lucide-react";
+import {
+  Settings2, Key, ShieldCheck, ShieldX, Save,
+  Eye, EyeOff, Moon, Bot, DatabaseBackup,
+  RefreshCw, Download, Clock
+} from "lucide-react";
 
 export default function Settings() {
   const { toast } = useToast();
@@ -19,11 +23,14 @@ export default function Settings() {
   const [apiHash, setApiHash] = useState("");
   const [showHash, setShowHash] = useState(false);
   const [autoSyncInterval, setAutoSyncInterval] = useState("30");
-  // P2-3: Sleep schedule
   const [activeStartHour, setActiveStartHour] = useState("8");
-  // P3-1: AI filter
   const [aiFilterEnabled, setAiFilterEnabled] = useState(false);
+  const [mongoBackupUrl, setMongoBackupUrl] = useState("");
+  const [mongoBackupDb, setMongoBackupDb] = useState("tg_backup");
   const [saving, setSaving] = useState(false);
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [restoreLoading, setRestoreLoading] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
 
   useEffect(() => {
     if (settings) {
@@ -37,559 +44,356 @@ export default function Settings() {
     }
   }, [settings]);
 
+  const credentialSource = (telegramStatus as any)?.source ?? "none";
+  const credentialConfigured = (telegramStatus as any)?.configured ?? false;
+
   const handleSaveTelegram = async () => {
-    if (!apiId.trim()) {
-      toast({ title: "خطأ", description: "API ID مطلوب", variant: "destructive" });
-      return;
-    }
-    if (!apiHash.trim()) {
-      toast({ title: "خطأ", description: "API Hash مطلوب", variant: "destructive" });
-      return;
-    }
+    if (!apiId.trim()) { toast({ title: "خطأ", description: "API ID مطلوب", variant: "destructive" }); return; }
+    if (!apiHash.trim()) { toast({ title: "خطأ", description: "API Hash مطلوب", variant: "destructive" }); return; }
     setSaving(true);
     updateSettings.mutate(
       { data: { telegram_api_id: apiId.trim(), telegram_api_hash: apiHash.trim() } },
       {
         onSuccess: () => {
-          toast({ title: "✅ تم الحفظ", description: "تم حفظ بيانات اعتماد Telegram API بنجاح" });
-          setApiHash("");
-          refetchSettings();
-          refetchStatus();
-          setSaving(false);
+          toast({ title: "✅ تم الحفظ", description: "تم حفظ بيانات Telegram API" });
+          setApiHash(""); refetchSettings(); refetchStatus(); setSaving(false);
         },
-        onError: () => {
-          toast({ title: "خطأ", description: "فشل حفظ الإعدادات", variant: "destructive" });
-          setSaving(false);
-        },
+        onError: () => { toast({ title: "خطأ", description: "فشل الحفظ", variant: "destructive" }); setSaving(false); },
       }
     );
   };
 
-  const handleSaveSync = async () => {
-    updateSettings.mutate(
-      { data: { auto_sync_interval_minutes: autoSyncInterval } },
-      {
-        onSuccess: () => {
-          toast({ title: "✅ تم الحفظ", description: "تم حفظ إعدادات التزامن" });
-          refetchSettings();
-        },
-        onError: () => {
-          toast({ title: "خطأ", description: "فشل حفظ الإعدادات", variant: "destructive" });
-        },
-      }
-    );
-  };
-
-  // P2-3: Save sleep schedule setting
-  const handleSaveSleep = () => {
+  const handleSaveSchedule = () => {
     const hour = parseInt(activeStartHour, 10);
     if (isNaN(hour) || hour < 0 || hour > 23) {
-      toast({ title: "خطأ", description: "ساعة البداية يجب أن تكون بين 0 و 23", variant: "destructive" });
-      return;
+      toast({ title: "خطأ", description: "ساعة البداية 0–23", variant: "destructive" }); return;
     }
     updateSettings.mutate(
-      { data: { active_start_hour: String(hour) } },
+      { data: { active_start_hour: String(hour), auto_sync_interval_minutes: autoSyncInterval } },
       {
         onSuccess: () => {
-          toast({ title: "✅ تم الحفظ", description: `ساعة البداية: ${hour}:00 — ينتهي النشاط الساعة ${(hour + 18) % 24}:00` });
+          toast({ title: "✅ تم الحفظ", description: `النشاط: ${String(hour).padStart(2,"0")}:00 → ${String((hour+18)%24).padStart(2,"0")}:00` });
           refetchSettings();
         },
-        onError: () => toast({ title: "خطأ", description: "فشل حفظ الإعدادات", variant: "destructive" }),
+        onError: () => toast({ title: "خطأ", description: "فشل الحفظ", variant: "destructive" }),
       }
     );
   };
 
-  // P3-3: MongoDB backup state
-  const [mongoBackupUrl, setMongoBackupUrl] = useState("");
-  const [mongoBackupDb, setMongoBackupDb] = useState("tg_backup");
-  const [backupLoading, setBackupLoading] = useState(false);
-  const [restoreLoading, setRestoreLoading] = useState(false);
-  const [importLoading, setImportLoading] = useState(false);
-  const [backupResult, setBackupResult] = useState<any>(null);
-  const [importResult, setImportResult] = useState<any>(null);
-
-  // P3-3: Save MongoDB backup URL
-  const handleSaveMongoBackup = () => {
-    if (!mongoBackupUrl.trim()) {
-      toast({ title: "خطأ", description: "أدخل رابط MongoDB أولاً", variant: "destructive" });
-      return;
-    }
-    updateSettings.mutate(
-      { data: { mongo_backup_url: mongoBackupUrl.trim(), mongo_backup_db: mongoBackupDb.trim() || "tg_backup" } },
-      {
-        onSuccess: () => {
-          toast({ title: "✅ تم الحفظ", description: "تم حفظ إعدادات النسخ الاحتياطي" });
-          refetchSettings();
-        },
-        onError: () => toast({ title: "خطأ", description: "فشل حفظ الإعدادات", variant: "destructive" }),
-      }
-    );
-  };
-
-  // P3-3: Trigger manual backup
-  const handleBackupNow = async () => {
-    setBackupLoading(true);
-    setBackupResult(null);
-    try {
-      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-      const r = await fetch(`${base}/api/sessions/backup`, { method: "POST" });
-      const data = await r.json();
-      setBackupResult(data);
-      if (data.ok) {
-        toast({ title: "✅ نسخ احتياطي مكتمل", description: `تم حفظ ${data.backedUp} جلسة في MongoDB` });
-      } else {
-        toast({ title: "خطأ", description: data.error ?? "فشل النسخ الاحتياطي", variant: "destructive" });
-      }
-    } catch {
-      toast({ title: "خطأ في الاتصال", description: "تأكد من أن الخادم يعمل", variant: "destructive" });
-    } finally {
-      setBackupLoading(false);
-    }
-  };
-
-  // P3-3: Restore sessions from MongoDB (existing accounts only)
-  const handleRestoreNow = async () => {
-    setRestoreLoading(true);
-    try {
-      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-      const r = await fetch(`${base}/api/sessions/restore`, { method: "POST" });
-      const data = await r.json();
-      if (data.ok) {
-        toast({ title: "✅ استعادة مكتملة", description: `تمت استعادة ${data.restored} جلسة من MongoDB` });
-      } else {
-        toast({ title: "خطأ", description: data.error ?? "فشلت الاستعادة", variant: "destructive" });
-      }
-    } catch {
-      toast({ title: "خطأ في الاتصال", variant: "destructive" });
-    } finally {
-      setRestoreLoading(false);
-    }
-  };
-
-  // Import ALL accounts from MongoDB → PostgreSQL (creates new accounts too)
-  const handleImportNow = async () => {
-    setImportLoading(true);
-    setImportResult(null);
-    try {
-      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-      const r = await fetch(`${base}/api/sessions/import`, { method: "POST" });
-      const data = await r.json();
-      setImportResult(data);
-      if (data.ok) {
-        toast({
-          title: "✅ استيراد مكتمل",
-          description: `جديد: ${data.imported} | محدّث: ${data.updated} | الإجمالي: ${data.total}`,
-        });
-      } else {
-        toast({ title: "خطأ في الاستيراد", description: data.error ?? "فشل الاستيراد", variant: "destructive" });
-      }
-    } catch {
-      toast({ title: "خطأ في الاتصال", description: "تأكد من أن الخادم يعمل", variant: "destructive" });
-    } finally {
-      setImportLoading(false);
-    }
-  };
-
-  // P3-1: Save AI filter setting
   const handleToggleAiFilter = (enabled: boolean) => {
     setAiFilterEnabled(enabled);
     updateSettings.mutate(
       { data: { ai_filter_enabled: String(enabled) } },
       {
         onSuccess: () => {
-          toast({ title: enabled ? "✅ تم تفعيل فلتر AI" : "🔕 تم تعطيل فلتر AI", description: enabled ? "سيتم استخدام Gemini لتصنيف المجموعات" : "سيُستخدم فقط الفلتر بالكلمات المفتاحية" });
+          toast({ title: enabled ? "✅ فلتر AI مُفعَّل" : "🔕 فلتر AI معطَّل" });
           refetchSettings();
         },
-        onError: () => { setAiFilterEnabled(!enabled); toast({ title: "خطأ", description: "فشل حفظ الإعداد", variant: "destructive" }); },
+        onError: () => { setAiFilterEnabled(!enabled); toast({ title: "خطأ", variant: "destructive" }); },
       }
     );
   };
 
-  const credentialSource = (telegramStatus as any)?.source ?? "none";
-  const credentialConfigured = (telegramStatus as any)?.configured ?? false;
+  const handleSaveBackupConfig = () => {
+    if (!mongoBackupUrl.trim()) { toast({ title: "خطأ", description: "أدخل رابط MongoDB أولاً", variant: "destructive" }); return; }
+    updateSettings.mutate(
+      { data: { mongo_backup_url: mongoBackupUrl.trim(), mongo_backup_db: mongoBackupDb.trim() || "tg_backup" } },
+      {
+        onSuccess: () => { toast({ title: "✅ تم الحفظ" }); refetchSettings(); },
+        onError: () => toast({ title: "خطأ", variant: "destructive" }),
+      }
+    );
+  };
+
+  const apiCall = async (path: string, method = "POST") => {
+    const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+    const r = await fetch(`${base}${path}`, { method });
+    return r.json();
+  };
+
+  const handleBackupNow = async () => {
+    setBackupLoading(true);
+    try {
+      const data = await apiCall("/api/sessions/backup");
+      if (data.ok) toast({ title: "✅ نسخ احتياطي مكتمل", description: `${data.backedUp} جلسة` });
+      else toast({ title: "خطأ", description: data.error, variant: "destructive" });
+    } catch { toast({ title: "خطأ في الاتصال", variant: "destructive" }); }
+    finally { setBackupLoading(false); }
+  };
+
+  const handleRestoreNow = async () => {
+    setRestoreLoading(true);
+    try {
+      const data = await apiCall("/api/sessions/restore");
+      if (data.ok) toast({ title: "✅ استعادة مكتملة", description: `${data.restored} جلسة` });
+      else toast({ title: "خطأ", description: data.error, variant: "destructive" });
+    } catch { toast({ title: "خطأ في الاتصال", variant: "destructive" }); }
+    finally { setRestoreLoading(false); }
+  };
+
+  const handleImportNow = async () => {
+    setImportLoading(true);
+    try {
+      const data = await apiCall("/api/sessions/import");
+      if (data.ok) toast({ title: "✅ استيراد مكتمل", description: `جديد: ${data.imported} | محدّث: ${data.updated}` });
+      else toast({ title: "خطأ", description: data.error, variant: "destructive" });
+    } catch { toast({ title: "خطأ في الاتصال", variant: "destructive" }); }
+    finally { setImportLoading(false); }
+  };
+
+  const startH = parseInt(activeStartHour) || 8;
+  const endH = (startH + 18) % 24;
 
   return (
-    <div className="space-y-8 font-mono" dir="rtl">
-      <div className="flex items-center gap-3">
-        <Settings2 className="w-6 h-6 text-primary" />
+    <div className="font-mono max-w-3xl" dir="rtl">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-6">
+        <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
+          <Settings2 className="w-5 h-5 text-primary" />
+        </div>
         <div>
-          <h1 className="text-2xl font-bold text-foreground">الإعدادات</h1>
-          <p className="text-sm text-muted-foreground">إدارة بيانات الاعتماد وإعدادات النظام</p>
+          <h1 className="text-xl font-bold text-foreground">الإعدادات</h1>
+          <p className="text-xs text-muted-foreground">إدارة بيانات الاعتماد وإعدادات النظام</p>
         </div>
       </div>
 
-      {/* Telegram API Credentials */}
-      <Card className="border-border bg-card">
-        <CardHeader className="border-b border-border pb-4">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base font-semibold">
-              <Key className="w-4 h-4 text-primary" />
-              بيانات اعتماد Telegram API
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              {credentialConfigured ? (
-                <Badge className="bg-primary/10 text-primary border border-primary/20 flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3" />
-                  مُفعَّل ({credentialSource === "env" ? "متغيرات البيئة" : "قاعدة البيانات"})
-                </Badge>
-              ) : (
-                <Badge variant="destructive" className="flex items-center gap-1">
-                  <ShieldX className="w-3 h-3" />
-                  غير مُفعَّل
-                </Badge>
-              )}
-            </div>
+      <Tabs defaultValue="telegram" className="w-full">
+        <TabsList className="w-full mb-5 grid grid-cols-3 bg-muted/50 border border-border rounded-lg p-1 h-auto gap-1">
+          <TabsTrigger value="telegram" className="flex items-center gap-2 text-xs py-2 rounded-md data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-primary/30">
+            <Key className="w-3.5 h-3.5" />
+            Telegram API
+          </TabsTrigger>
+          <TabsTrigger value="schedule" className="flex items-center gap-2 text-xs py-2 rounded-md data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-primary/30">
+            <Clock className="w-3.5 h-3.5" />
+            الجدول
+          </TabsTrigger>
+          <TabsTrigger value="backup" className="flex items-center gap-2 text-xs py-2 rounded-md data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-primary/30">
+            <DatabaseBackup className="w-3.5 h-3.5" />
+            النسخ الاحتياطي
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ── TAB 1: Telegram API + AI Filter ── */}
+        <TabsContent value="telegram" className="space-y-4 mt-0">
+          {/* Status bar */}
+          <div className="flex items-center justify-between px-4 py-2.5 rounded-lg border bg-card">
+            <span className="text-xs text-muted-foreground">حالة الاعتماد</span>
+            {credentialConfigured ? (
+              <Badge className="bg-primary/10 text-primary border border-primary/20 flex items-center gap-1 text-xs">
+                <ShieldCheck className="w-3 h-3" />
+                مُفعَّل — {credentialSource === "env" ? "متغيرات البيئة" : "قاعدة البيانات"}
+              </Badge>
+            ) : (
+              <Badge variant="destructive" className="flex items-center gap-1 text-xs">
+                <ShieldX className="w-3 h-3" />
+                غير مُفعَّل
+              </Badge>
+            )}
           </div>
-        </CardHeader>
-        <CardContent className="pt-6 space-y-5">
+
           {credentialSource === "env" && (
-            <div className="bg-primary/5 border border-primary/20 rounded-md p-3 text-sm text-primary">
-              ✅ البيانات محملة من متغيرات البيئة (TELEGRAM_API_ID / TELEGRAM_API_HASH). يمكنك تجاوزها هنا.
+            <div className="flex items-start gap-2 bg-primary/5 border border-primary/20 rounded-lg p-3 text-xs text-primary">
+              <ShieldCheck className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+              البيانات محملة من متغيرات البيئة. يمكنك تجاوزها هنا.
             </div>
           )}
 
-          <div className="text-xs text-muted-foreground bg-muted/30 rounded-md p-3 border border-border">
-            <p className="font-semibold mb-1 text-foreground">كيفية الحصول على بيانات الاعتماد:</p>
-            <ol className="list-decimal list-inside space-y-1">
-              <li>افتح <span className="text-primary">my.telegram.org/apps</span></li>
-              <li>سجل الدخول برقم هاتفك</li>
-              <li>أنشئ تطبيقاً جديداً للحصول على <code className="bg-muted px-1 rounded">API ID</code> و <code className="bg-muted px-1 rounded">API Hash</code></li>
-            </ol>
-          </div>
-
-          <div className="grid gap-4">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-foreground">API ID</Label>
-              <Input
-                type="text"
-                placeholder="مثال: 12345678"
-                value={apiId}
-                onChange={(e) => setApiId(e.target.value)}
-                className="font-mono bg-background border-border text-foreground"
-                dir="ltr"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-foreground">API Hash</Label>
-              <div className="relative">
+          {/* API credentials — 2-col grid */}
+          <div className="bg-card border border-border rounded-lg p-4 space-y-4">
+            <p className="text-xs font-semibold text-foreground border-b border-border pb-2">بيانات my.telegram.org/apps</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground">API ID</Label>
                 <Input
-                  type={showHash ? "text" : "password"}
-                  placeholder={credentialConfigured && credentialSource === "database" ? "••••••••••••••••" : "أدخل API Hash"}
-                  value={apiHash}
-                  onChange={(e) => setApiHash(e.target.value)}
-                  className="font-mono bg-background border-border text-foreground pr-10"
+                  type="text" placeholder="12345678"
+                  value={apiId} onChange={(e) => setApiId(e.target.value)}
+                  className="h-8 text-sm font-mono bg-background border-border"
                   dir="ltr"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowHash(!showHash)}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showHash ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
               </div>
-              {credentialConfigured && credentialSource === "database" && (
-                <p className="text-xs text-muted-foreground">اتركه فارغاً للاحتفاظ بالقيمة الحالية</p>
-              )}
-            </div>
-          </div>
-
-          <Button
-            onClick={handleSaveTelegram}
-            disabled={saving || updateSettings.isPending}
-            className="flex items-center gap-2"
-          >
-            <Save className="w-4 h-4" />
-            {saving ? "جاري الحفظ..." : "حفظ بيانات الاعتماد"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Auto-Sync Settings */}
-      <Card className="border-border bg-card">
-        <CardHeader className="border-b border-border pb-4">
-          <CardTitle className="flex items-center gap-2 text-base font-semibold">
-            <Settings2 className="w-4 h-4 text-primary" />
-            إعدادات التزامن التلقائي (MongoDB)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-6 space-y-5">
-          <div className="space-y-2">
-            <Label className="text-sm font-medium text-foreground">فترة التزامن التلقائي (بالدقائق)</Label>
-            <Input
-              type="number"
-              min="5"
-              max="1440"
-              value={autoSyncInterval}
-              onChange={(e) => setAutoSyncInterval(e.target.value)}
-              className="w-40 font-mono bg-background border-border text-foreground"
-              dir="ltr"
-            />
-            <p className="text-xs text-muted-foreground">
-              القيمة الافتراضية: 30 دقيقة. تغيير هذه القيمة يسري عند إعادة تشغيل الخادم.
-            </p>
-          </div>
-          <Button
-            onClick={handleSaveSync}
-            disabled={updateSettings.isPending}
-            variant="outline"
-            className="flex items-center gap-2"
-          >
-            <Save className="w-4 h-4" />
-            حفظ إعدادات التزامن
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* P2-3: Sleep Schedule */}
-      <Card className="border-border bg-card">
-        <CardHeader className="border-b border-border pb-4">
-          <CardTitle className="flex items-center gap-2 text-base font-semibold">
-            <Moon className="w-4 h-4 text-primary" />
-            جدول النشاط اليومي (ساعات العمل)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-6 space-y-5">
-          <div className="bg-muted/30 border border-border rounded-md p-3 text-xs text-muted-foreground space-y-1">
-            <p>البوت يعمل <span className="text-foreground font-semibold">18 ساعة</span> يومياً ثم يدخل في وضع الراحة.</p>
-            <p>يمكنك تحديد ساعة بداية النشاط — النظام يحسب نهاية النشاط تلقائياً (بداية + 18 ساعة).</p>
-            <p className="text-yellow-400">التغيير يسري فوراً على دورة العمل القادمة.</p>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-sm font-medium text-foreground">
-              ساعة بداية النشاط (0–23)
-            </Label>
-            <div className="flex items-center gap-3">
-              <Input
-                type="number"
-                min="0"
-                max="23"
-                value={activeStartHour}
-                onChange={(e) => setActiveStartHour(e.target.value)}
-                className="w-24 font-mono bg-background border-border text-foreground text-center"
-                dir="ltr"
-              />
-              <div className="text-sm text-muted-foreground">
-                النشاط:{" "}
-                <span className="text-primary font-mono">
-                  {String(parseInt(activeStartHour) || 8).padStart(2, "0")}:00
-                </span>
-                {" → "}
-                <span className="text-primary font-mono">
-                  {String(((parseInt(activeStartHour) || 8) + 18) % 24).padStart(2, "0")}:00
-                </span>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground">API Hash</Label>
+                <div className="relative">
+                  <Input
+                    type={showHash ? "text" : "password"}
+                    placeholder={credentialConfigured && credentialSource === "database" ? "••••••••••••••••" : "أدخل API Hash"}
+                    value={apiHash} onChange={(e) => setApiHash(e.target.value)}
+                    className="h-8 text-sm font-mono bg-background border-border pl-8"
+                    dir="ltr"
+                  />
+                  <button
+                    type="button" onClick={() => setShowHash(!showHash)}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showHash ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              مثال: 8 = ينشط من 8:00 صباحاً حتى 2:00 صباحاً (18 ساعة). التباين اليومي ±1 ساعة تلقائياً.
-            </p>
-          </div>
-
-          <Button
-            onClick={handleSaveSleep}
-            disabled={updateSettings.isPending}
-            variant="outline"
-            className="flex items-center gap-2"
-          >
-            <Save className="w-4 h-4" />
-            حفظ جدول النشاط
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* P3-1: AI Filter */}
-      <Card className="border-border bg-card">
-        <CardHeader className="border-b border-border pb-4">
-          <CardTitle className="flex items-center gap-2 text-base font-semibold">
-            <Bot className="w-4 h-4 text-primary" />
-            فلتر الذكاء الاصطناعي (Gemini)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-6 space-y-5">
-          <div className="bg-muted/30 border border-border rounded-md p-3 text-xs text-muted-foreground space-y-1">
-            <p>عند التفعيل، يستخدم البوت <span className="text-primary font-semibold">Google Gemini</span> لتصنيف المجموعات كمجموعة طبية/بحثية/تعليمية.</p>
-            <p>يتجاوز حدود الفلتر بالكلمات المفتاحية ويفهم السياق بدقة أعلى.</p>
-            <p>يتطلب وجود <code className="bg-muted px-1 rounded font-mono">GEMINI_API_KEY</code> في متغيرات البيئة.</p>
-          </div>
-
-          <div className="flex items-center justify-between p-4 bg-background border border-border rounded-lg">
-            <div className="space-y-1">
-              <Label className="text-sm font-medium text-foreground cursor-pointer">
-                {aiFilterEnabled ? "🤖 فلتر AI مُفعَّل" : "💤 فلتر AI معطَّل"}
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                {aiFilterEnabled
-                  ? "يُستخدم Gemini لكل مجموعة جديدة"
-                  : "يُستخدم فقط الفلتر بالكلمات المفتاحية"}
-              </p>
-            </div>
-            <Switch
-              checked={aiFilterEnabled}
-              onCheckedChange={handleToggleAiFilter}
-              disabled={updateSettings.isPending}
-            />
-          </div>
-
-          {aiFilterEnabled && (
-            <div className="bg-primary/5 border border-primary/20 rounded-md p-3 text-xs text-primary">
-              ✅ الفلتر نشط — كل مجموعة ستُعرض على Gemini قبل تسجيلها كمرتبطة/غير مرتبطة.
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* P3-3: MongoDB Session Backup */}
-      <Card className="border-border bg-card">
-        <CardHeader className="border-b border-border pb-4">
-          <CardTitle className="flex items-center gap-2 text-base font-semibold">
-            <DatabaseBackup className="w-4 h-4 text-primary" />
-            نسخ احتياطي للجلسات (MongoDB)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-6 space-y-5">
-          <div className="bg-muted/30 border border-border rounded-md p-3 text-xs text-muted-foreground space-y-1">
-            <p>يحفظ جلسات جميع حسابات تيليجرام في MongoDB كنسخة احتياطية.</p>
-            <p>مفيد في حالة فقدان قاعدة البيانات المحلية أو إعادة النشر — بدلاً من إعادة تسجيل دخول كل حساب.</p>
-            <p className="text-yellow-400 font-medium">⚠️ تأكد أن قاعدة MongoDB محمية بكلمة مرور — الجلسات بيانات حساسة جداً.</p>
-          </div>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-foreground">رابط MongoDB (Connection String)</Label>
-              <Input
-                type="password"
-                placeholder="mongodb+srv://user:password@cluster.mongodb.net"
-                value={mongoBackupUrl}
-                onChange={(e) => setMongoBackupUrl(e.target.value)}
-                className="font-mono bg-background border-border text-foreground text-xs"
-                dir="ltr"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-foreground">اسم قاعدة البيانات</Label>
-              <Input
-                placeholder="tg_backup"
-                value={mongoBackupDb}
-                onChange={(e) => setMongoBackupDb(e.target.value)}
-                className="w-48 font-mono bg-background border-border text-foreground"
-                dir="ltr"
-              />
-              <p className="text-xs text-muted-foreground">
-                سيتم إنشاء مجموعة <code className="bg-muted px-1 rounded font-mono">tg_sessions</code> تلقائياً داخل هذه القاعدة.
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-primary/10 border border-primary/30 rounded-md p-3 text-sm text-primary font-medium">
-            💡 إذا كانت حساباتك محفوظة في MongoDB — اضغط <strong>استيراد الحسابات</strong> مباشرة (لا تحتاج تعبئة الحقول أدناه).
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <Button
-              onClick={handleImportNow}
-              disabled={importLoading}
-              className="flex items-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
-            >
-              {importLoading
-                ? <RefreshCw className="w-4 h-4 animate-spin" />
-                : <Download className="w-4 h-4" />}
-              استيراد الحسابات من MongoDB
+            <Button onClick={handleSaveTelegram} disabled={saving || updateSettings.isPending} size="sm" className="flex items-center gap-2">
+              <Save className="w-3.5 h-3.5" />
+              {saving ? "جاري الحفظ..." : "حفظ بيانات الاعتماد"}
             </Button>
           </div>
 
-          {importResult && (
-            <div className={`rounded-md p-3 text-xs font-mono space-y-1 border ${importResult.ok ? "bg-primary/5 border-primary/20 text-primary" : "bg-destructive/5 border-destructive/20 text-destructive"}`}>
-              {importResult.ok ? (
-                <>
-                  <p>✅ استيراد مكتمل من MongoDB → PostgreSQL</p>
-                  <p>
-                    جديد: <span className="font-bold">{importResult.imported}</span> &nbsp;|&nbsp;
-                    محدّث: <span className="font-bold">{importResult.updated}</span> &nbsp;|&nbsp;
-                    تجاوز: <span className="font-bold">{importResult.skipped}</span> &nbsp;|&nbsp;
-                    أخطاء: <span className="font-bold">{importResult.errors}</span> &nbsp;|&nbsp;
-                    الإجمالي: <span className="font-bold">{importResult.total}</span>
+          {/* AI Filter */}
+          <div className="bg-card border border-border rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-1.5 rounded-md ${aiFilterEnabled ? "bg-primary/10 border border-primary/20" : "bg-muted border border-border"}`}>
+                  <Bot className={`w-4 h-4 ${aiFilterEnabled ? "text-primary" : "text-muted-foreground"}`} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-foreground">فلتر Gemini AI</p>
+                  <p className="text-xs text-muted-foreground">
+                    {aiFilterEnabled ? "يُصنّف المجموعات بالذكاء الاصطناعي" : "يستخدم الكلمات المفتاحية فقط"}
                   </p>
-                </>
-              ) : (
-                <p>❌ {importResult.error}</p>
-              )}
+                </div>
+              </div>
+              <Switch checked={aiFilterEnabled} onCheckedChange={handleToggleAiFilter} disabled={updateSettings.isPending} />
             </div>
-          )}
+            {aiFilterEnabled && (
+              <div className="mt-3 text-xs text-primary bg-primary/5 border border-primary/20 rounded-md px-3 py-2">
+                ✅ Gemini نشط — كل مجموعة جديدة ستُعرض للتصنيف قبل الانضمام
+              </div>
+            )}
+          </div>
+        </TabsContent>
 
-          <hr className="border-border" />
-          <p className="text-xs text-muted-foreground font-semibold">نسخ احتياطي يدوي (اختياري — لإعداد قاعدة بيانات مختلفة)</p>
+        {/* ── TAB 2: Schedule + Auto-sync ── */}
+        <TabsContent value="schedule" className="space-y-4 mt-0">
+          <div className="bg-card border border-border rounded-lg p-4 space-y-4">
+            <p className="text-xs font-semibold text-foreground border-b border-border pb-2 flex items-center gap-2">
+              <Moon className="w-3.5 h-3.5 text-primary" />
+              ساعات النشاط اليومي
+            </p>
 
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-foreground">رابط MongoDB (Connection String)</Label>
+            {/* Visual schedule indicator */}
+            <div className="flex items-center gap-3 p-3 bg-background border border-border rounded-lg">
+              <div className="text-center">
+                <p className="text-xs text-muted-foreground mb-0.5">البداية</p>
+                <p className="text-lg font-bold text-primary font-mono">{String(startH).padStart(2,"0")}:00</p>
+              </div>
+              <div className="flex-1 flex items-center gap-1">
+                <div className="h-1.5 flex-1 bg-primary/30 rounded-full">
+                  <div className="h-full bg-primary rounded-full" style={{width: "100%"}} />
+                </div>
+                <span className="text-xs text-muted-foreground flex-shrink-0">18 ساعة</span>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-muted-foreground mb-0.5">النهاية</p>
+                <p className="text-lg font-bold text-primary font-mono">{String(endH).padStart(2,"0")}:00</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground">ساعة البداية (0–23)</Label>
+                <Input
+                  type="number" min="0" max="23"
+                  value={activeStartHour} onChange={(e) => setActiveStartHour(e.target.value)}
+                  className="h-8 w-24 text-sm font-mono text-center bg-background border-border"
+                  dir="ltr"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground">فترة التزامن (دقيقة)</Label>
+                <Input
+                  type="number" min="5" max="1440"
+                  value={autoSyncInterval} onChange={(e) => setAutoSyncInterval(e.target.value)}
+                  className="h-8 w-24 text-sm font-mono text-center bg-background border-border"
+                  dir="ltr"
+                />
+              </div>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              مثال: بداية 8 → نشاط من <span className="text-primary font-mono">08:00</span> حتى <span className="text-primary font-mono">02:00</span>. تباين ±1 ساعة تلقائياً.
+            </p>
+
+            <Button onClick={handleSaveSchedule} disabled={updateSettings.isPending} size="sm" className="flex items-center gap-2">
+              <Save className="w-3.5 h-3.5" />
+              حفظ الجدول
+            </Button>
+          </div>
+        </TabsContent>
+
+        {/* ── TAB 3: MongoDB Backup ── */}
+        <TabsContent value="backup" className="space-y-4 mt-0">
+          <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2 text-xs text-amber-400 flex items-start gap-2">
+            <span className="flex-shrink-0">⚠️</span>
+            الجلسات بيانات حساسة — تأكد أن قاعدة MongoDB محمية بكلمة مرور.
+          </div>
+
+          {/* Config */}
+          <div className="bg-card border border-border rounded-lg p-4 space-y-3">
+            <p className="text-xs font-semibold text-foreground border-b border-border pb-2">إعدادات قاعدة النسخ الاحتياطي</p>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Connection String</Label>
               <Input
-                type="password"
-                placeholder="mongodb+srv://user:password@cluster.mongodb.net"
-                value={mongoBackupUrl}
-                onChange={(e) => setMongoBackupUrl(e.target.value)}
-                className="font-mono bg-background border-border text-foreground text-xs"
+                type="password" placeholder="mongodb+srv://user:password@cluster.mongodb.net"
+                value={mongoBackupUrl} onChange={(e) => setMongoBackupUrl(e.target.value)}
+                className="h-8 text-xs font-mono bg-background border-border"
                 dir="ltr"
               />
             </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-foreground">اسم قاعدة البيانات</Label>
-              <Input
-                placeholder="Joining_links"
-                value={mongoBackupDb}
-                onChange={(e) => setMongoBackupDb(e.target.value)}
-                className="w-48 font-mono bg-background border-border text-foreground"
-                dir="ltr"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground">اسم قاعدة البيانات</Label>
+                <Input
+                  placeholder="tg_backup"
+                  value={mongoBackupDb} onChange={(e) => setMongoBackupDb(e.target.value)}
+                  className="h-8 text-sm font-mono bg-background border-border"
+                  dir="ltr"
+                />
+              </div>
             </div>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <Button
-              onClick={handleSaveMongoBackup}
-              disabled={updateSettings.isPending}
-              variant="outline"
-              className="flex items-center gap-2"
-            >
-              <Save className="w-4 h-4" />
-              حفظ الإعدادات
-            </Button>
-            <Button
-              onClick={handleBackupNow}
-              disabled={backupLoading || !mongoBackupUrl}
-              variant="outline"
-              className="flex items-center gap-2 border-primary/40 text-primary hover:bg-primary/10"
-            >
-              {backupLoading
-                ? <RefreshCw className="w-4 h-4 animate-spin" />
-                : <Upload className="w-4 h-4" />}
-              نسخ احتياطي الآن
-            </Button>
-            <Button
-              onClick={handleRestoreNow}
-              disabled={restoreLoading || !mongoBackupUrl}
-              variant="outline"
-              className="flex items-center gap-2 border-yellow-500/40 text-yellow-400 hover:bg-yellow-500/10"
-            >
-              {restoreLoading
-                ? <RefreshCw className="w-4 h-4 animate-spin" />
-                : <Download className="w-4 h-4" />}
-              استعادة الجلسات
+            <Button onClick={handleSaveBackupConfig} disabled={updateSettings.isPending} size="sm" variant="outline" className="flex items-center gap-2">
+              <Save className="w-3.5 h-3.5" />
+              حفظ الإعداد
             </Button>
           </div>
 
-          {backupResult && backupResult.ok && (
-            <div className="bg-primary/5 border border-primary/20 rounded-md p-3 text-xs text-primary font-mono space-y-1">
-              <p>✅ نسخ احتياطي مكتمل</p>
-              <p>محفوظ: <span className="font-bold">{backupResult.backedUp}</span> جلسة &nbsp;|&nbsp;
-                بدون جلسة: <span className="font-bold">{backupResult.skipped}</span> &nbsp;|&nbsp;
-                أخطاء: <span className="font-bold">{backupResult.errors}</span>
-              </p>
+          {/* Actions */}
+          <div className="bg-card border border-border rounded-lg p-4 space-y-3">
+            <p className="text-xs font-semibold text-foreground border-b border-border pb-2">العمليات</p>
+            <div className="grid grid-cols-1 gap-2">
+              <div className="flex items-center justify-between p-3 bg-background border border-border rounded-lg">
+                <div>
+                  <p className="text-xs font-medium text-foreground">استيراد الحسابات من MongoDB</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">يجلب الحسابات والجلسات المحفوظة</p>
+                </div>
+                <Button onClick={handleImportNow} disabled={importLoading} size="sm" className="flex items-center gap-1.5 flex-shrink-0">
+                  {importLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  استيراد
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-background border border-border rounded-lg">
+                <div>
+                  <p className="text-xs font-medium text-foreground">نسخ احتياطي الآن</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">حفظ جميع الجلسات في MongoDB</p>
+                </div>
+                <Button onClick={handleBackupNow} disabled={backupLoading} size="sm" variant="outline" className="flex items-center gap-1.5 flex-shrink-0">
+                  {backupLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <DatabaseBackup className="w-3.5 h-3.5" />}
+                  نسخ
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-background border border-border rounded-lg">
+                <div>
+                  <p className="text-xs font-medium text-foreground">استعادة الجلسات</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">استعادة الجلسات للحسابات الموجودة فقط</p>
+                </div>
+                <Button onClick={handleRestoreNow} disabled={restoreLoading} size="sm" variant="outline" className="flex items-center gap-1.5 flex-shrink-0">
+                  {restoreLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  استعادة
+                </Button>
+              </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
