@@ -95,6 +95,7 @@ export interface BotStateDoc {
   running: boolean;
   currentAccountPhone: string | null;
   startedAt: Date | null;
+  forceActiveUntil: Date | null; // temporary override: skip blackout until this time
   updatedAt: Date;
 }
 
@@ -247,6 +248,7 @@ export async function initMongo(): Promise<void> {
         running: false,
         currentAccountPhone: null,
         startedAt: null,
+        forceActiveUntil: null as Date | null,
         updatedAt: new Date(),
       },
     },
@@ -284,6 +286,7 @@ export async function getBotState(): Promise<BotStateDoc> {
       running: false,
       currentAccountPhone: null,
       startedAt: null,
+      forceActiveUntil: null as Date | null,
       updatedAt: new Date(),
     });
     state = await col.findOne({ _id: "singleton" as any });

@@ -148,12 +148,19 @@ async function tick(): Promise<void> {
     setAiFilterEnabled(aiEnabled);
 
     if (isBlackoutHourConfigurable(activeStartHour)) {
-      const waitMs = msUntilActiveStartConfigurable(activeStartHour);
-      const endHour = (activeStartHour + 18) % 24;
-      logger.info({ waitMinutes: Math.ceil(waitMs / 60_000), activeStartHour, endHour }, "Blackout window — pausing");
-      await logActivity("bot_stopped", `⏸ وقت الراحة — ينتهي الساعة ${activeStartHour}:00`);
-      scheduleNext(waitMs);
-      return;
+      // Check force-active override (user clicked "تشغيل فوراً")
+      const forceUntil = state.forceActiveUntil ? new Date(state.forceActiveUntil) : null;
+      if (forceUntil && forceUntil > new Date()) {
+        // Override active — skip blackout this cycle
+        logger.info({ forceUntil }, "Force-active override — skipping blackout");
+      } else {
+        const waitMs = msUntilActiveStartConfigurable(activeStartHour);
+        const endHour = (activeStartHour + 18) % 24;
+        logger.info({ waitMinutes: Math.ceil(waitMs / 60_000), activeStartHour, endHour }, "Blackout window — pausing");
+        await logActivity("bot_stopped", `⏸ وقت الراحة — ينتهي الساعة ${activeStartHour}:00`);
+        scheduleNext(waitMs);
+        return;
+      }
     }
 
     const now = new Date();

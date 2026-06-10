@@ -34,6 +34,7 @@ router.get("/bot/status", async (req, res): Promise<void> => {
     queueSize,
     rotationInterval: SAFE_INTERVAL_PER_ACCOUNT_SECS,
     startedAt: state.startedAt ? new Date(state.startedAt).toISOString() : null,
+    forceActiveUntil: state.forceActiveUntil ? new Date(state.forceActiveUntil).toISOString() : null,
     totalJoinedToday,
     totalFailedToday,
   });
@@ -107,6 +108,38 @@ router.post("/bot/stop", async (req, res): Promise<void> => {
     startedAt: null,
     totalJoinedToday: 0,
     totalFailedToday: 0,
+  });
+});
+
+router.post("/bot/force-resume", async (req, res): Promise<void> => {
+  const hours = Number((req.body as any)?.hours ?? 4);
+  const forceActiveUntil = new Date(Date.now() + Math.min(hours, 12) * 60 * 60 * 1000);
+
+  await setBotState({ running: true, forceActiveUntil, startedAt: new Date() });
+
+  const { ObjectId } = await import("mongodb");
+  const activityCol = await collections.activityLog();
+  await activityCol.insertOne({
+    _id: new ObjectId(),
+    type: "engine_started",
+    message: `⚡ تشغيل فوري — تجاوز وقت الراحة حتى ${forceActiveUntil.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}`,
+    accountPhone: null,
+    linkUrl: null,
+    errorCode: null,
+    waitSeconds: null,
+    createdAt: new Date(),
+  });
+
+  await engineStart();
+
+  const linksCol = await collections.targetLinks();
+  const queueSize = await linksCol.countDocuments({ status: "pending" });
+
+  res.json({
+    ok: true,
+    running: true,
+    forceActiveUntil: forceActiveUntil.toISOString(),
+    queueSize,
   });
 });
 
