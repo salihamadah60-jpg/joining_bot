@@ -6,6 +6,8 @@
  *   - Checks JOINED collection before every join attempt (dedup across restarts)
  *   - On success: inserts into JOINED collection
  *   - Channels: inserts into Channels collection
+ *   - parseJoinTarget: extracts username/hash from full t.me URLs
+ *   - pending_review: uncertain groups go to review queue
  */
 
 import { ObjectId } from "mongodb";
@@ -37,6 +39,47 @@ const RETRY_DELAY_MS = 60 * 60 * 1000;
 let timer: NodeJS.Timeout | null = null;
 let engineRunning = false;
 let accountIndex = 0;
+
+// ─── URL Parser ───────────────────────────────────────────────────────────────
+
+/**
+ * Extract the correct join target from a full t.me URL.
+ *
+ * Examples:
+ *   https://t.me/usstudents        → "usstudents"  (public username)
+ *   https://t.me/+ABC123xyz        → "https://t.me/+ABC123xyz"  (private invite)
+ *   https://t.me/joinchat/ABC123   → "https://t.me/joinchat/ABC123"  (old invite)
+ *   t.me/usstudents                → "usstudents"
+ */
+export function parseJoinTarget(url: string): string {
+  try {
+    let normalized = url.trim();
+    // Normalize t.me/ without protocol
+    if (/^t\.me\//i.test(normalized)) normalized = "https://" + normalized;
+    if (!/^https?:\/\//i.test(normalized)) return url;
+
+    const u = new URL(normalized);
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (!parts.length) return url;
+
+    const first = parts[0]!;
+
+    // Private invite (new format): /+HASH
+    if (first.startsWith("+")) {
+      return `https://t.me/${first}`;
+    }
+
+    // Private invite (old format): /joinchat/HASH
+    if (first.toLowerCase() === "joinchat" && parts[1]) {
+      return `https://t.me/joinchat/${parts[1]}`;
+    }
+
+    // Public group/channel username — return just the username
+    return first;
+  } catch {
+    return url;
+  }
+}
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -250,17 +293,19 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<vo
   }
 
   try {
-    const joined = await client.joinChat(link.url);
+    // ── CRITICAL: Parse the join target (extract username from full URL) ──
+    const joinTarget = parseJoinTarget(link.url);
+    logger.debug({ url: link.url, joinTarget, phone: account.phone }, "Joining with parsed target");
+
+    const joined = await client.joinChat(joinTarget);
 
     const groupTitle: string | null = (joined as any)?.title ?? null;
     const chatId = (joined as any)?.id ?? null;
     const rawType: string = String((joined as any)?.chatType ?? (joined as any)?.type ?? "");
     const groupType = categorizeChatType(rawType);
 
-    // ── Channel detection: leave immediately + save to Channels ──
+    // ── Channel detection: save to Channels collection (don't leave — channels are useful) ──
     if (groupType === "channel") {
-      try { await client.leaveChat(chatId ?? link.url); } catch {}
-
       const channelsCol = await collections.channels();
       try {
         await channelsCol.insertOne({ _id: new ObjectId(), url: link.url, title: groupTitle, detectedAt: new Date() });
@@ -268,20 +313,41 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<vo
 
       await targetLinksCol.updateOne(
         { _id: link._id },
-        { $set: { status: "skipped", failReason: "channel_type", groupTitle, groupType, processedAt: new Date() } }
+        { $set: { status: "joined", groupTitle, groupType, usedByAccountPhone: account.phone, processedAt: new Date() } }
       );
 
-      const msg = `📡 قناة — تم حفظها: ${groupTitle ?? link.url}`;
-      await logActivity("skipped", msg, account.phone, link.url);
-      await logJoinJob(account.phone, link.url, "skipped", "CHANNEL_TYPE", "قناة — تم الحفظ في مجموعة القنوات");
+      // Update account counters
+      await accountsCol.updateOne(
+        { _id: account._id },
+        { $inc: { joinedCount: 1, joinedToday: 1, channelsCount: 1 }, $set: { lastJoinAt: new Date(), updatedAt: new Date() } }
+      );
+
+      const msg = `📡 قناة — تم الانضمام وحفظها: ${groupTitle ?? link.url}`;
+      await logActivity("join_success", msg, account.phone, link.url);
+      await logJoinJob(account.phone, link.url, "success", "CHANNEL_TYPE", "قناة — تم الحفظ في مجموعة القنوات");
       eventBus.publish({ type: "channel_detected", message: msg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });
       return;
     }
 
-    // ── Post-join observation + AI relevance check ──
+    // ── Post-join observation: simulate reading messages (human-like behaviour) ──
     let sampleMessages: string[] = [];
     if (chatId) sampleMessages = await observeGroupAfterJoin(client, chatId, link.url);
+
+    // ── AI / keyword relevance check (3-state: true / false / null=uncertain) ──
     const relevant = await isRelevantGroupAsync(groupTitle, null, sampleMessages);
+
+    if (relevant === null) {
+      // ── Uncertain: needs user review ──
+      await targetLinksCol.updateOne(
+        { _id: link._id },
+        { $set: { status: "pending_review", groupTitle, groupType, usedByAccountPhone: account.phone, processedAt: new Date() } }
+      );
+      const msg = `🔍 غير محدد — ينتظر المراجعة: ${groupTitle ?? link.url} [${account.phone}]`;
+      await logActivity("pending_review", msg, account.phone, link.url);
+      await logJoinJob(account.phone, link.url, "pending_review", "UNCERTAIN", "يحتاج مراجعة يدوية");
+      eventBus.publish({ type: "pending_review", message: msg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });
+      return;
+    }
 
     // ── Update TARGET_LINKS ──
     await targetLinksCol.updateOne(
@@ -319,7 +385,9 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<vo
       }
     );
 
-    const msg = `✅ انضمام: ${groupTitle ?? link.url} [${account.phone}]`;
+    const msg = relevant
+      ? `✅ انضمام: ${groupTitle ?? link.url} [${account.phone}]`
+      : `ℹ️ انضمام (خارج النطاق): ${groupTitle ?? link.url} [${account.phone}]`;
     eventBus.publish({ type: "join_success", message: msg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });
     await logActivity("join_success", msg, account.phone, link.url);
     await logJoinJob(account.phone, link.url, "success");
@@ -370,17 +438,9 @@ async function handleJoinError(account: AccountDoc, link: TargetLinkDoc, err: un
     }
 
     case "already_joined": {
-      // Insert into JOINED (dedup record) + mark TARGET_LINKS as joined
       const joinedCol = await collections.joined();
       try {
-        await joinedCol.insertOne({
-          _id: new ObjectId(),
-          url: link.url,
-          accountPhone: account.phone,
-          groupTitle: null,
-          groupType: null,
-          joinedAt: new Date(),
-        });
+        await joinedCol.insertOne({ _id: new ObjectId(), url: link.url, accountPhone: account.phone, groupTitle: null, groupType: null, joinedAt: new Date() });
       } catch {}
       await targetLinksCol.updateOne(
         { _id: link._id },

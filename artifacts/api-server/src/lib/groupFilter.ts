@@ -3,21 +3,23 @@
  *
  * The bot is designed to join ONLY medical, research, and educational groups.
  * Filter is applied to the group title (and description if available).
- * If the title is unknown (e.g. private invite link with no preview), we join anyway
- * and trust the source (links should be pre-vetted).
  *
- * P2-2: observeGroupAfterJoin — After joining, wait 3–10 seconds and read recent
- * messages to simulate human behaviour and gather data for the AI classifier.
+ * Return values from isRelevantGroupAsync:
+ *   true  → clearly relevant (join, keep)
+ *   false → clearly NOT relevant (mark not_in_scope)
+ *   null  → uncertain (no title + no AI + no messages → pending_review)
  *
- * P3-1: isRelevantGroupAsync — Uses GEMINI_API_KEY when enabled; falls back to keywords.
+ * Learning: checks learnedPatterns collection for user-confirmed decisions
+ * before running AI/keyword classification.
  */
 
 import { logger } from "./logger.js";
 import { aiClassifyGroup, isAiFilterEnabled } from "./aiFilter.js";
+import { collections } from "@workspace/db";
 import type { TelegramClient } from "@mtcute/node";
 
 /**
- * P2-2: Post-join observation delay (3–10 seconds, random).
+ * Post-join observation delay (3–10 seconds, random).
  * Simulates a human reading messages after joining.
  * Returns up to 8 recent message texts for the AI classifier.
  */
@@ -31,11 +33,20 @@ export async function observeGroupAfterJoin(
 
   const sampleMessages: string[] = [];
   try {
-    const history = await (client as any).getHistory(chatId, { limit: 8 });
+    // Try different @mtcute history methods
+    let history: any[] | null = null;
+
+    if (typeof (client as any).getMessages === "function") {
+      history = await (client as any).getMessages(chatId, { limit: 8 });
+    } else if (typeof (client as any).getHistory === "function") {
+      history = await (client as any).getHistory(chatId, { limit: 8 });
+    }
+
     if (Array.isArray(history)) {
       for (const msg of history) {
-        const text: string | undefined = msg?.text ?? msg?.message ?? msg?.content?.text;
-        if (text && text.trim().length > 5) {
+        const text: string | undefined =
+          msg?.text ?? msg?.message ?? msg?.content?.text ?? msg?.content;
+        if (text && typeof text === "string" && text.trim().length > 5) {
           sampleMessages.push(text.trim().substring(0, 200));
         }
       }
@@ -51,21 +62,72 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * P3-1 + P2-2: Async relevance check.
- * Tries Gemini AI first (when GEMINI_API_KEY is set), falls back to keywords.
+ * Check user-learned patterns first (from previous approve/reject decisions).
+ * Returns true (relevant) / false (not relevant) / null (no learned pattern found).
+ */
+async function checkLearnedPatterns(
+  title: string | null | undefined,
+  sampleMessages: string[]
+): Promise<boolean | null> {
+  if (!title && sampleMessages.length === 0) return null;
+
+  try {
+    const col = await collections.learnedPatterns();
+    const patterns = await col.find({}).toArray();
+
+    const combined = ((title ?? "") + " " + sampleMessages.join(" ")).toLowerCase();
+
+    for (const pattern of patterns) {
+      if (
+        pattern.keywords &&
+        Array.isArray(pattern.keywords) &&
+        pattern.keywords.some((kw: string) => combined.includes(kw.toLowerCase()))
+      ) {
+        logger.debug({ title, decision: pattern.decision }, "Matched learned pattern");
+        return pattern.decision === "relevant";
+      }
+    }
+  } catch {
+    // collections.learnedPatterns might not exist yet — ignore
+  }
+  return null;
+}
+
+/**
+ * 3-state async relevance check.
+ *   true  → keep (relevant)
+ *   false → not in scope
+ *   null  → uncertain → pending_review
+ *
+ * Priority: learned patterns → AI → keywords → uncertain
  */
 export async function isRelevantGroupAsync(
   title: string | null | undefined,
   description?: string | null,
   sampleMessages: string[] = []
-): Promise<boolean> {
-  if (!title && !description) return true;
+): Promise<boolean | null> {
+  // 1. Check learned patterns (user-confirmed decisions)
+  const learned = await checkLearnedPatterns(title, sampleMessages);
+  if (learned !== null) return learned;
 
+  // 2. No info at all → uncertain (pending_review)
+  if (!title && !description && sampleMessages.length === 0) return null;
+
+  // 3. Try AI classification
   if (isAiFilterEnabled()) {
     const aiResult = await aiClassifyGroup(title, sampleMessages);
     if (aiResult !== null) return aiResult;
+    // AI returned null (unavailable/error) — fall through to keywords
+    // but if keywords don't match clearly, return null (uncertain)
+    const kwResult = isRelevantGroup(title, description);
+    if (!kwResult) {
+      // AI unavailable + keywords say "no" → uncertain, needs human review
+      return null;
+    }
+    return kwResult;
   }
 
+  // 4. Keyword-only (no AI)
   return isRelevantGroup(title, description);
 }
 
@@ -125,7 +187,7 @@ const RELEVANT_KEYWORDS = [
   "cardiology", "neurology", "dermatology", "oncology",
   "pediatric", "gynecology", "psychiatry", "orthopedic",
   "anatomy", "physiology", "biochemistry", "pathology",
-  "emergency", "ambulance", "icu", "icu nurse",
+  "emergency", "ambulance", "icu",
   "diabetes", "cancer", "tumor",
   // ===== English: Research/Academic =====
   "research", "science", "scientific", "study",
@@ -133,23 +195,23 @@ const RELEVANT_KEYWORDS = [
   "student", "graduate", "phd", "master",
   "lecture", "curriculum", "thesis", "dissertation",
   "med student", "medstudent",
+  // ===== Student/Scholarship keywords (added for common group names) =====
+  "students", "scholarship", "scholarships", "admission", "admissions",
+  "طلاب الخارج", "ابتعاث", "منح", "دراسة الخارج",
 ];
 
-// Normalize to lowercase once
 const NORMALIZED_KEYWORDS = RELEVANT_KEYWORDS.map((k) => k.toLowerCase());
 
 /**
- * Returns true if the group title/description is relevant (medical/research/educational).
- * Returns true also when both title and description are empty/null (trust the source).
+ * Returns true if the group title/description is relevant.
+ * Returns false when title/description exist but no keywords match.
  */
 export function isRelevantGroup(
   title: string | null | undefined,
   description?: string | null
 ): boolean {
-  if (!title && !description) return true; // unknown → trust source
-
+  if (!title && !description) return true;
   const combined = ((title ?? "") + " " + (description ?? "")).toLowerCase();
-
   return NORMALIZED_KEYWORDS.some((kw) => combined.includes(kw));
 }
 
@@ -157,7 +219,8 @@ export function isRelevantGroup(
  * Categorize the group type string for logging.
  */
 export function categorizeChatType(raw: string): "group" | "channel" | "unknown" {
-  if (raw.includes("channel")) return "channel";
-  if (raw.includes("group") || raw.includes("chat") || raw.includes("supergroup")) return "group";
+  const lower = raw.toLowerCase();
+  if (lower.includes("channel")) return "channel";
+  if (lower.includes("group") || lower.includes("chat") || lower.includes("supergroup")) return "group";
   return "unknown";
 }

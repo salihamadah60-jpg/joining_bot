@@ -49,6 +49,7 @@ router.get("/links/stats", async (req, res): Promise<void> => {
     joined: links.filter((l) => l.status === "joined").length,
     failed: links.filter((l) => l.status === "failed").length,
     skipped: links.filter((l) => l.status === "skipped").length,
+    pendingReview: links.filter((l) => l.status === "pending_review").length,
   });
 });
 
@@ -118,7 +119,6 @@ router.post("/links/bulk", async (req, res): Promise<void> => {
   const alreadyJoinedUrls: { url: string; accountPhone: string }[] = [];
 
   for (const url of rawUrls) {
-    // Check JOINED collection first
     const joinedDoc = await joinedCol.findOne({ url });
     if (joinedDoc) {
       alreadyJoined++;
@@ -170,6 +170,82 @@ router.post("/links/:id/retry", async (req, res): Promise<void> => {
   if (!result) { res.status(404).json({ error: "Link not found" }); return; }
   res.json(serializeLink(result));
 });
+
+/** Approve a pending_review link: mark as pending so bot joins + learn pattern */
+router.post("/links/:id/approve", async (req, res): Promise<void> => {
+  const id = req.params["id"];
+  if (!id || !ObjectId.isValid(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const col = await collections.targetLinks();
+  const link = await col.findOne({ _id: new ObjectId(id) });
+  if (!link) { res.status(404).json({ error: "Link not found" }); return; }
+
+  // Already joined (pending_review means we joined but weren't sure) → confirm as joined
+  await col.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: { status: "joined", failReason: null, processedAt: new Date() } }
+  );
+
+  // Learn from this decision
+  if (link.groupTitle) {
+    await saveLearnedPattern(link.groupTitle, "relevant");
+  }
+
+  res.json({ ok: true, status: "joined" });
+});
+
+/** Reject a pending_review link: mark as skipped + learn pattern */
+router.post("/links/:id/reject", async (req, res): Promise<void> => {
+  const id = req.params["id"];
+  if (!id || !ObjectId.isValid(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const col = await collections.targetLinks();
+  const link = await col.findOne({ _id: new ObjectId(id) });
+  if (!link) { res.status(404).json({ error: "Link not found" }); return; }
+
+  await col.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: { status: "skipped", failReason: "user_rejected", processedAt: new Date() } }
+  );
+
+  // Learn from this decision
+  if (link.groupTitle) {
+    await saveLearnedPattern(link.groupTitle, "not_relevant");
+  }
+
+  res.json({ ok: true, status: "skipped" });
+});
+
+/** Save a learned pattern for future auto-classification */
+async function saveLearnedPattern(groupTitle: string, decision: "relevant" | "not_relevant"): Promise<void> {
+  try {
+    const col = await collections.learnedPatterns();
+    // Extract keywords from title (words > 3 chars)
+    const keywords = groupTitle
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 3 && /[a-z\u0600-\u06ff]/i.test(w));
+
+    if (keywords.length === 0) return;
+
+    // Upsert by title
+    await col.updateOne(
+      { groupTitle: groupTitle.toLowerCase() },
+      {
+        $set: {
+          groupTitle: groupTitle.toLowerCase(),
+          decision,
+          keywords,
+          updatedAt: new Date(),
+        },
+        $setOnInsert: { _id: new ObjectId(), createdAt: new Date() },
+      },
+      { upsert: true }
+    );
+  } catch (e) {
+    // Collection might not exist yet — ignore
+  }
+}
 
 router.delete("/links/:id", async (req, res): Promise<void> => {
   const id = req.params["id"];

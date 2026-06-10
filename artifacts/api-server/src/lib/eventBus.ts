@@ -17,6 +17,8 @@ export type BotEventType =
   | "join_failed"
   | "engine_started"
   | "engine_stopped"
+  | "pending_review"
+  | "bot_stopped"
   | "sync_progress"
   | "sync_complete"
   | "sync_error";

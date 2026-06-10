@@ -128,6 +128,15 @@ export interface MongoCollectionDoc {
   updatedAt: Date;
 }
 
+export interface LearnedPatternDoc {
+  _id: ObjectId;
+  groupTitle: string;
+  decision: "relevant" | "not_relevant";
+  keywords: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // ─── Connection singleton ─────────────────────────────────────────────────────
 
 let _client: MongoClient | null = null;
@@ -183,6 +192,7 @@ export const collections = {
   channels: () => col<ChannelDoc>("Channels"),
   joinHistory: () => col<JoinHistoryDoc>("join_history"),
   mongoCollections: () => col<MongoCollectionDoc>("mongo_collections"),
+  learnedPatterns: () => col<LearnedPatternDoc>("learned_patterns"),
 } as const;
 
 // ─── Init: create indexes + ensure bot_state singleton ───────────────────────
@@ -224,6 +234,9 @@ export async function initMongo(): Promise<void> {
 
   // tg_sessions backup (keep existing index)
   await db.collection("tg_sessions").createIndex({ phone: 1 }, { unique: true });
+
+  // learned_patterns
+  await db.collection("learned_patterns").createIndex({ groupTitle: 1 }, { unique: true });
 
   // Ensure bot_state singleton exists
   await db.collection<BotStateDoc>("bot_state").updateOne(

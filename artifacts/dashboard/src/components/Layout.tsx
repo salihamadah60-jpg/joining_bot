@@ -8,14 +8,17 @@ import {
   Activity,
   Settings,
   BarChart2,
-  Radio
+  Radio,
+  ScanSearch,
 } from "lucide-react";
-import { useHealthCheck } from "@workspace/api-client-react";
+import { useHealthCheck, useGetLinksStats } from "@workspace/api-client-react";
 import { NotificationBell } from "./NotificationBell";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { data: health } = useHealthCheck();
+  const { data: linkStats } = useGetLinksStats();
+  const pendingReviewCount = (linkStats as any)?.pendingReview ?? 0;
 
   const navigation = [
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -24,6 +27,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { name: "Join History", href: "/jobs", icon: ActivitySquare },
     { name: "Collections", href: "/collections", icon: Database },
     { name: "Channels", href: "/channels", icon: Radio },
+    { name: "Review", href: "/review", icon: ScanSearch, badge: pendingReviewCount },
     { name: "Analytics", href: "/analytics", icon: BarChart2 },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
@@ -42,6 +46,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
           {navigation.map((item) => {
             const isActive = location === item.href;
+            const badge = (item as any).badge as number | undefined;
             return (
               <Link key={item.name} href={item.href}>
                 <span className={`flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-colors cursor-pointer ${
@@ -49,8 +54,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     ? "bg-primary/10 text-primary border border-primary/20" 
                     : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
                 }`}>
-                  <item.icon className={`w-4 h-4 ${isActive ? "text-primary" : "text-sidebar-foreground/50"}`} />
-                  {item.name}
+                  <item.icon className={`w-4 h-4 flex-shrink-0 ${isActive ? "text-primary" : "text-sidebar-foreground/50"}`} />
+                  <span className="flex-1">{item.name}</span>
+                  {badge != null && badge > 0 && (
+                    <span className="ml-auto bg-orange-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  )}
                 </span>
               </Link>
             );

@@ -149,6 +149,37 @@ router.delete("/accounts/:id", async (req, res): Promise<void> => {
   res.sendStatus(204);
 });
 
+/** Quick ping — checks if the Telegram session is actually connected */
+router.get("/accounts/:id/ping", async (req, res): Promise<void> => {
+  const id = req.params["id"];
+  if (!id || !ObjectId.isValid(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const col = await collections.accounts();
+  const account = await col.findOne({ _id: new ObjectId(id) });
+  if (!account) { res.status(404).json({ error: "Account not found" }); return; }
+  if (!account.sessionString) {
+    res.json({ connected: false, reason: "no_session" });
+    return;
+  }
+
+  try {
+    const client = await getClient(account.phone, account.sessionString, {});
+    // getMe() is the lightest possible call — returns self user info
+    const me = await (client as any).getMe();
+    const firstName: string = me?.firstName ?? me?.first_name ?? "";
+    const username: string = me?.username ?? "";
+    res.json({ connected: true, firstName, username });
+  } catch (err: any) {
+    const msg: string = err?.message ?? String(err);
+    // Detect auth errors
+    const isAuthError = /AUTH_KEY|SESSION_EXPIRED|SESSION_REVOKED|UNAUTHORIZED/i.test(msg);
+    if (isAuthError) {
+      await col.updateOne({ _id: new ObjectId(id) }, { $set: { status: "needs_auth", sessionString: null, updatedAt: new Date() } });
+    }
+    res.json({ connected: false, reason: msg.substring(0, 100) });
+  }
+});
+
 router.post("/accounts/:id/sync-dialogs", async (req, res): Promise<void> => {
   const id = req.params["id"];
   if (!id || !ObjectId.isValid(id)) {
