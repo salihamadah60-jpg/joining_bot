@@ -19,7 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Users, Plus, Trash2, KeyRound, CheckCircle2, Wifi, WifiOff, RefreshCw } from "lucide-react";
+import { Users, Plus, Trash2, KeyRound, CheckCircle2, XCircle, Wifi, WifiOff, RefreshCw, Radio } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
@@ -308,6 +308,33 @@ export default function Accounts() {
   };
 
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [pingingId, setPingingId] = useState<string | null>(null);
+  const [pingResults, setPingResults] = useState<Record<string, { ok: boolean; name?: string; error?: string }>>({});
+
+  const pingAccount = useMutation({
+    mutationFn: async (id: string) => {
+      const r = await fetch(`/api/accounts/${id}/ping`);
+      if (!r.ok) throw new Error(await r.text());
+      return r.json() as Promise<{ ok: boolean; firstName?: string; username?: string; error?: string }>;
+    },
+    onSuccess: (data, id) => {
+      setPingingId(null);
+      setPingResults((prev) => ({
+        ...prev,
+        [id]: { ok: data.ok, name: data.firstName ?? data.username, error: data.error },
+      }));
+      if (data.ok) {
+        toast({ title: `✅ متصل — ${data.firstName ?? data.username ?? ""}`, description: "الجلسة نشطة" });
+      } else {
+        toast({ title: "❌ الاتصال فشل", description: data.error ?? "الجلسة منتهية", variant: "destructive" });
+      }
+    },
+    onError: (e: any, id) => {
+      setPingingId(null);
+      setPingResults((prev) => ({ ...prev, [id]: { ok: false, error: e?.message } }));
+      toast({ title: "❌ خطأ في الفحص", description: e?.message, variant: "destructive" });
+    },
+  });
 
   const syncDialogs = useMutation({
     mutationFn: async (id: string) => {
@@ -450,6 +477,35 @@ export default function Accounts() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
+                      {/* Ping — check live connection */}
+                      {acc.hasSession && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => { setPingingId(acc.id); pingAccount.mutate(acc.id); }}
+                          disabled={pingingId === acc.id}
+                          className={`font-mono text-xs gap-1 ${
+                            pingResults[acc.id]?.ok === true
+                              ? "border-primary/50 text-primary hover:bg-primary/10"
+                              : pingResults[acc.id]?.ok === false
+                              ? "border-destructive/50 text-destructive hover:bg-destructive/10"
+                              : "border-muted-foreground/30 text-muted-foreground hover:text-foreground"
+                          }`}
+                          title="فحص الاتصال الحقيقي بتيليجرام"
+                        >
+                          {pingingId === acc.id ? (
+                            <Radio className="w-3 h-3 animate-pulse" />
+                          ) : pingResults[acc.id]?.ok === true ? (
+                            <CheckCircle2 className="w-3 h-3" />
+                          ) : pingResults[acc.id]?.ok === false ? (
+                            <XCircle className="w-3 h-3" />
+                          ) : (
+                            <Radio className="w-3 h-3" />
+                          )}
+                          PING
+                        </Button>
+                      )}
+
                       {/* Sync dialogs count button */}
                       {acc.hasSession && (
                         <Button
