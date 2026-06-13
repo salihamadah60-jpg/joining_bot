@@ -181,14 +181,22 @@ router.post("/auth/cancel", async (req, res): Promise<void> => {
 });
 
 /**
- * GET /auth/pending-code/:phone
- * Tries to auto-capture the OTP code from Telegram service messages (777000).
- * Works when the account has an existing session string in the DB.
- * Returns { found: true, code: "12345" } or { found: false }.
+ * GET /auth/pending-code/:phone[?after=<unix_seconds>]
+ * Reads recent messages from Telegram service number 777000 and extracts
+ * any OTP code found. Works for active sessions (not just during re-auth).
+ *
+ * Query param:
+ *   after — Unix timestamp (seconds). Only return codes with msg.date >= after.
+ *           Use this to filter out old stored codes and only capture new ones.
+ *
+ * Returns { found: true, code: "12345", date: 1720000000 } or { found: false }.
  */
 router.get("/auth/pending-code/:phone", async (req, res): Promise<void> => {
   const phone = decodeURIComponent(req.params["phone"] ?? "");
   if (!phone) { res.json({ found: false }); return; }
+
+  // Only return codes received at or after this Unix timestamp (seconds)
+  const afterTs = req.query["after"] ? parseInt(req.query["after"] as string, 10) : 0;
 
   try {
     const col = await collections.accounts();
@@ -207,7 +215,7 @@ router.get("/auth/pending-code/:phone", async (req, res): Promise<void> => {
       offsetId: 0,
       offsetDate: 0,
       addOffset: 0,
-      limit: 3,
+      limit: 5,
       maxId: 0,
       minId: 0,
       hash: BigInt(0),
@@ -216,10 +224,15 @@ router.get("/auth/pending-code/:phone", async (req, res): Promise<void> => {
     const messages: any[] = result?.messages ?? [];
     for (const msg of messages) {
       const text: string = msg?.message ?? "";
-      // Telegram OTP messages start with the code: "12345 is your login code"
+      const msgDate: number = msg?.date ?? 0; // Unix seconds (Telegram native format)
+
+      // Skip codes that arrived before we started watching
+      if (afterTs && msgDate < afterTs) continue;
+
+      // Telegram OTP messages: "12345 is your login code" or "12345\n..."
       const match = text.match(/^(\d{5,6})[\s\n\-–]/);
-      if (match && match[1]) {
-        res.json({ found: true, code: match[1] });
+      if (match?.[1]) {
+        res.json({ found: true, code: match[1], date: msgDate });
         return;
       }
     }

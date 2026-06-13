@@ -19,7 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Users, Plus, Trash2, KeyRound, CheckCircle2, XCircle, Wifi, WifiOff, RefreshCw, Radio, ChevronDown, ChevronRight, ExternalLink, List, Copy } from "lucide-react";
+import { Users, Plus, Trash2, KeyRound, CheckCircle2, XCircle, Wifi, WifiOff, RefreshCw, Radio, ChevronDown, ChevronRight, ExternalLink, List, Copy, Hash } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -333,6 +333,127 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
   );
 }
 
+// ─── Code Watch Panel ─────────────────────────────────────────────────────────
+
+interface CodeWatchPanelProps {
+  phone: string;
+  startedAt: number; // Unix seconds — only return codes newer than this
+  onClose: () => void;
+}
+
+function CodeWatchPanel({ phone, startedAt, onClose }: CodeWatchPanelProps) {
+  const [code, setCode] = useState<string | null>(null);
+  const [found, setFound] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(300); // 5 minutes
+  const { toast } = useToast();
+
+  // Countdown timer
+  useEffect(() => {
+    if (found) return;
+    const t = setInterval(() => setSecondsLeft((prev) => Math.max(0, prev - 1)), 1000);
+    return () => clearInterval(t);
+  }, [found]);
+
+  // Polling every 3 seconds for a fresh code from 777000
+  useEffect(() => {
+    if (found) return;
+
+    let stopped = false;
+
+    const doPoll = async () => {
+      if (stopped) return;
+      try {
+        const r = await fetch(
+          `/api/auth/pending-code/${encodeURIComponent(phone)}?after=${startedAt}`
+        );
+        const data: { found: boolean; code?: string } = await r.json();
+        if (data.found && data.code && !stopped) {
+          stopped = true;
+          setCode(data.code);
+          setFound(true);
+          toast({
+            title: "🎉 وصل كود التحقق!",
+            description: `الكود: ${data.code} — الحساب ${phone}`,
+            duration: 20_000,
+          });
+        }
+      } catch { /* ignore network errors */ }
+    };
+
+    doPoll(); // immediate first check
+    const intervalId = setInterval(doPoll, 3_000);
+    // Auto-stop after 5 minutes
+    const timeoutId = setTimeout(() => { stopped = true; clearInterval(intervalId); }, 300_000);
+
+    return () => {
+      stopped = true;
+      clearInterval(intervalId);
+      clearTimeout(timeoutId);
+    };
+  }, [found]);
+
+  const copyCode = () => {
+    if (!code) return;
+    navigator.clipboard.writeText(code).catch(() => {});
+    toast({ title: "✅ تم نسخ الكود", description: code, duration: 4_000 });
+  };
+
+  const mins = Math.floor(secondsLeft / 60);
+  const secs = secondsLeft % 60;
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 py-1 font-mono" dir="rtl">
+      {!found ? (
+        <>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-primary animate-pulse flex-shrink-0" />
+            <span className="text-xs text-muted-foreground">
+              في انتظار كود التحقق من
+            </span>
+            <span className="text-xs font-bold text-primary">777000</span>
+            <span className="text-xs text-muted-foreground/50">({phone})</span>
+          </div>
+          {secondsLeft > 0 ? (
+            <span className="text-xs text-muted-foreground/60 bg-muted px-2 py-0.5 rounded">
+              {mins}:{secs.toString().padStart(2, "0")} متبقي
+            </span>
+          ) : (
+            <span className="text-xs text-yellow-500">انتهى وقت الانتظار — لم يصل كود</span>
+          )}
+          <button
+            onClick={onClose}
+            className="text-xs text-muted-foreground hover:text-foreground underline"
+          >
+            إلغاء
+          </button>
+        </>
+      ) : (
+        <>
+          <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+          <span className="text-xs text-muted-foreground">كود التحقق:</span>
+          <span className="text-xl font-bold tracking-[0.4em] text-primary bg-primary/10 border border-primary/40 px-4 py-1 rounded-md select-all cursor-text">
+            {code}
+          </span>
+          <button
+            onClick={copyCode}
+            className="flex items-center gap-1.5 text-sm bg-primary text-primary-foreground px-3 py-1.5 rounded hover:bg-primary/90 transition-colors"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            نسخ الكود
+          </button>
+          <span className="text-xs text-muted-foreground/50">({phone})</span>
+          <button
+            onClick={onClose}
+            className="text-xs text-muted-foreground hover:text-foreground underline"
+          >
+            إغلاق
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Accounts() {
@@ -399,6 +520,13 @@ export default function Accounts() {
   const [pingingId, setPingingId] = useState<string | null>(null);
   const [pingResults, setPingResults] = useState<Record<string, { ok: boolean; name?: string; error?: string }>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [codeWatcherId, setCodeWatcherId] = useState<string | null>(null);
+  const [codeWatchStart, setCodeWatchStart] = useState<number>(0); // Unix seconds
+
+  const startCodeWatcher = (id: string) => {
+    setCodeWatcherId(id);
+    setCodeWatchStart(Math.floor(Date.now() / 1000));
+  };
 
   const reuseJoined = useMutation({
     mutationFn: async () => {
@@ -645,6 +773,25 @@ export default function Accounts() {
                         </button>
                       )}
 
+                      {/* Code watcher — capture OTP from 777000 for active sessions */}
+                      {acc.hasSession && (
+                        <button
+                          onClick={() =>
+                            codeWatcherId === acc.id
+                              ? setCodeWatcherId(null)
+                              : startCodeWatcher(acc.id)
+                          }
+                          title="التقاط كود التحقق من 777000"
+                          className={`w-7 h-7 flex items-center justify-center rounded border transition-colors ${
+                            codeWatcherId === acc.id
+                              ? "border-primary text-primary bg-primary/15 animate-pulse"
+                              : "border-muted-foreground/30 text-muted-foreground hover:text-foreground hover:border-muted-foreground/60"
+                          }`}
+                        >
+                          <Hash className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
                       {/* Auth button */}
                       <AuthDialog phone={acc.phone} onDone={invalidate} />
 
@@ -676,6 +823,28 @@ export default function Accounts() {
                           المجموعات المنضم إليها — {acc.phone}
                         </p>
                         <GroupsPanel accountId={acc.id} />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {codeWatcherId === acc.id && (
+                  <TableRow className="border-card-border bg-primary/5 hover:bg-primary/5">
+                    <TableCell colSpan={7} className="py-2.5 px-6">
+                      <div className="border border-primary/20 rounded-lg px-4 py-2 bg-background">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <Hash className="w-3.5 h-3.5 text-primary" />
+                          <span className="text-xs font-semibold text-foreground font-mono">
+                            مراقبة كود التحقق — 777000
+                          </span>
+                          <span className="text-[10px] text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">
+                            اذهب للتطبيق الآخر واطلب الكود، سيظهر هنا تلقائياً
+                          </span>
+                        </div>
+                        <CodeWatchPanel
+                          phone={acc.phone}
+                          startedAt={codeWatchStart}
+                          onClose={() => setCodeWatcherId(null)}
+                        />
                       </div>
                     </TableCell>
                   </TableRow>
