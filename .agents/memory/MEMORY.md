@@ -1,1 +1,2 @@
 - [Telegram Bot Manager Setup](telegram-bot-setup.md) — MongoDB-only architecture, MemoryStorage for Telegram sessions, no PostgreSQL/SQLite/Drizzle
+- [API Server Fast Startup](api-server-startup.md) — use `pnpm exec tsx src/index.ts` for dev; never rebuild with esbuild on every start

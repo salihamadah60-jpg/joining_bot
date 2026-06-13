@@ -4,14 +4,20 @@
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- Dashboard: `pnpm --filter @workspace/dashboard run dev` → port 5000 (webview)
+- API Server: `pnpm --filter @workspace/api-server run dev` → port 8080 (console) — uses `tsx`, starts in ~3s, NO build step
 - `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
+- `pnpm run build` — typecheck + build all packages (for production only)
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - `pnpm --filter @workspace/scripts run push-github` — push project to GitHub repo
-- Required env: `DATABASE_URL` — Postgres connection string
-- Required env: `TELEGRAM_API_ID` + `TELEGRAM_API_HASH` — from https://my.telegram.org
+- Required secrets: `MONGODB_URL`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`
+
+## ⚠️ API Server dev script — MUST use tsx
+The `dev` script in `artifacts/api-server/package.json` MUST be:
+```
+"dev": "NODE_ENV=development pnpm exec tsx src/index.ts"
+```
+NEVER revert to `pnpm run build && pnpm run start` for dev — that rebuilds the full esbuild bundle on every restart (slow). tsx starts the server in seconds without a build step. After adding tsx to devDependencies, run `pnpm install` once to create the binary symlink.
 
 ## Stack
 
