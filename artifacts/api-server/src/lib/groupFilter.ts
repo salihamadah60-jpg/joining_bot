@@ -99,13 +99,19 @@ async function checkLearnedPatterns(
  *   false → not in scope
  *   null  → uncertain → pending_review
  *
- * Priority: learned patterns → AI → keywords → uncertain
+ * Priority: hard-block → learned patterns → AI → keywords → uncertain
  */
 export async function isRelevantGroupAsync(
   title: string | null | undefined,
   description?: string | null,
   sampleMessages: string[] = []
 ): Promise<boolean | null> {
+  // 0. Hard-block check — investment/crypto/ads → always reject immediately
+  if (isHardBlocked(title, description, sampleMessages)) {
+    logger.info({ title }, "Group hard-blocked (investment/crypto/ads) — skipping");
+    return false;
+  }
+
   // 1. Check learned patterns (user-confirmed decisions)
   const learned = await checkLearnedPatterns(title, sampleMessages);
   if (learned !== null) return learned;
@@ -129,6 +135,56 @@ export async function isRelevantGroupAsync(
 
   // 4. Keyword-only (no AI)
   return isRelevantGroup(title, description);
+}
+
+/**
+ * HARD-BLOCKED keywords — groups matching ANY of these are ALWAYS rejected,
+ * regardless of AI or learned patterns. These are unambiguously non-medical.
+ *
+ * Covers investment, trading, crypto, IPO, advertising platforms, and
+ * any group with "منصة" (platform — typically advertising/investment bots).
+ */
+const HARD_BLOCKED_KEYWORDS = [
+  // Arabic: Investment / Finance
+  "استثمار", "استثمارات", "مستثمر", "مستثمرين", "للمستثمرين",
+  "عملات رقمية", "عملة رقمية",
+  "كريبتو", "كريبتوا",
+  "بيتكوين",
+  "بلوكشين", "بلوك شين",
+  "اكتتاب", "أكتتاب", "اكتتابات", "أكتتابات",
+  "فوركس",
+  "مضاربة",
+  "امبات", "أمبات",
+  "كابيتال",
+  "توصيات تداول", "توصيات الاسهم", "توصيات الفوركس",
+  "ربح سريع", "ارباح سريعة", "تربح من",
+  // Arabic: Advertising platforms (المنصة used as a group identity = ads)
+  "منصة",
+  // English: Crypto / Investment
+  "crypto", "cryptocurrency",
+  "bitcoin", "btc", "ethereum", "eth", "usdt", "solana",
+  "blockchain",
+  "forex",
+  "ipo", "ico", "nft",
+  "trading signals", "signals",
+  "investment opportunity",
+];
+
+const NORMALIZED_BLOCKED = HARD_BLOCKED_KEYWORDS.map((k) => k.toLowerCase());
+
+/**
+ * Returns true if the group title/description matches a hard-blocked keyword.
+ * These groups must NEVER be joined — they are investment/crypto/ad platforms.
+ */
+export function isHardBlocked(
+  title: string | null | undefined,
+  description?: string | null,
+  sampleMessages: string[] = []
+): boolean {
+  const combined = (
+    (title ?? "") + " " + (description ?? "") + " " + sampleMessages.join(" ")
+  ).toLowerCase();
+  return NORMALIZED_BLOCKED.some((kw) => combined.includes(kw));
 }
 
 const RELEVANT_KEYWORDS = [
@@ -204,12 +260,14 @@ const NORMALIZED_KEYWORDS = RELEVANT_KEYWORDS.map((k) => k.toLowerCase());
 
 /**
  * Returns true if the group title/description is relevant.
- * Returns false when title/description exist but no keywords match.
+ * Returns false when title/description exist but no keywords match,
+ * OR if the title matches a hard-blocked investment/ads term.
  */
 export function isRelevantGroup(
   title: string | null | undefined,
   description?: string | null
 ): boolean {
+  if (isHardBlocked(title, description)) return false;
   if (!title && !description) return true;
   const combined = ((title ?? "") + " " + (description ?? "")).toLowerCase();
   return NORMALIZED_KEYWORDS.some((kw) => combined.includes(kw));

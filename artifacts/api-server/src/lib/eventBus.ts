@@ -22,7 +22,8 @@ export type BotEventType =
   | "sync_progress"
   | "sync_complete"
   | "sync_error"
-  | "invite_request";
+  | "invite_request"
+  | "invite_request_approved";
 
 export interface BotEvent {
   type: BotEventType;

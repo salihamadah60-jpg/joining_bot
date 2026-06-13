@@ -9,6 +9,7 @@ import { useState, useEffect, useRef } from "react";
 import { Bell, BellRing, X, CheckCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 interface BotEvent {
   type: string;
@@ -25,6 +26,7 @@ const CRITICAL_TYPES = new Set([
   "flood_wait_long",
   "channels_limit",
   "links_exhausted",
+  "invite_request_approved",
 ]);
 
 function eventIcon(type: string): string {
@@ -36,6 +38,8 @@ function eventIcon(type: string): string {
     case "links_exhausted": return "📭";
     case "join_success": return "✅";
     case "join_failed": return "❌";
+    case "invite_request": return "📩";
+    case "invite_request_approved": return "🎉";
     case "engine_started": return "▶️";
     case "engine_stopped": return "⏸";
     default: return "ℹ️";
@@ -49,12 +53,26 @@ function formatTime(iso: string): string {
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
+// Translates event type to Arabic label for toasts
+function eventLabel(type: string): string {
+  switch (type) {
+    case "account_banned": return "🔴 حساب محظور";
+    case "account_needs_auth": return "🔑 يحتاج تسجيل دخول";
+    case "flood_wait_long": return "⏳ انتظار إجباري";
+    case "channels_limit": return "⛔ حد القنوات";
+    case "links_exhausted": return "📭 انتهت الروابط";
+    case "invite_request_approved": return "🎉 تم قبول طلب انضمام!";
+    default: return type;
+  }
+}
+
 export function NotificationBell() {
   const [notifications, setNotifications] = useState<BotEvent[]>([]);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const [connected, setConnected] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     let es: EventSource;
@@ -75,6 +93,13 @@ export function NotificationBell() {
           });
           if (CRITICAL_TYPES.has(event.type)) {
             setUnread((prev) => prev + 1);
+            // Show immediate toast for critical events
+            toast({
+              title: eventLabel(event.type),
+              description: event.message,
+              duration: event.type === "invite_request_approved" ? 10_000 : 6_000,
+              variant: event.type === "account_banned" ? "destructive" : "default",
+            });
           }
         } catch {
           // ignore parse errors

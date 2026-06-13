@@ -14,6 +14,7 @@ import type { InviteRequestDoc } from "@workspace/db";
 import { getClient } from "./clientPool.js";
 import { logger } from "./logger.js";
 import { extractErrorCode } from "./telegramErrors.js";
+import { eventBus } from "./eventBus.js";
 
 const CHECK_INTERVAL_MS = 10 * 60_000; // 10 minutes
 let checkerTimer: NodeJS.Timeout | null = null;
@@ -132,6 +133,15 @@ async function markApproved(doc: InviteRequestDoc, groupTitle: string | null): P
   } catch (_) {}
 
   logger.info({ url: doc.url, phone: doc.accountPhone, groupTitle }, "Invite request approved");
+
+  // Publish SSE notification so the dashboard shows a real-time toast
+  eventBus.publish({
+    type: "invite_request_approved",
+    message: `✅ تم قبول طلب الانضمام: ${groupTitle ?? doc.url} [${doc.accountPhone}]`,
+    accountPhone: doc.accountPhone,
+    linkUrl: doc.url,
+    timestamp: new Date().toISOString(),
+  });
 }
 
 async function markExpired(doc: InviteRequestDoc): Promise<void> {

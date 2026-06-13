@@ -38,12 +38,28 @@ export function isAiFilterEnabled(): boolean {
   return !!process.env["GEMINI_API_KEY"];
 }
 
-const SYSTEM_PROMPT = `You are a strict group classifier for a Telegram bot.
-Your ONLY job: decide if a Telegram group is relevant to medicine, medical education, scientific research, or health sciences.
-Answer with EXACTLY one word: "yes" or "no".
+const SYSTEM_PROMPT = `You are a strict group classifier for a Telegram bot that joins ONLY medical, health, and academic research groups.
+Your ONLY job: decide if a Telegram group is relevant. Answer with EXACTLY one word: "yes" or "no".
 
-Relevant: medical groups, doctor groups, nursing, pharmacy, medical students, hospitals, health research, anatomy, physiology, biochemistry, pathology, clinical groups, scientific research, academic medicine.
-NOT relevant: general chat, religion, politics, entertainment, business, news, sports, games, cooking, etc.`;
+RELEVANT (answer "yes"):
+- Medical groups: doctors, nurses, pharmacy, hospitals, clinics, health research
+- Medical students / academic medicine / medical university groups
+- Health sciences: anatomy, physiology, biochemistry, pathology, radiology
+- Scientific / academic research groups
+
+ALWAYS REJECT (answer "no" immediately — do NOT consider these relevant):
+- Investment groups: any mention of استثمار, investment, profit, returns, returns on investment
+- Cryptocurrency / blockchain: crypto, bitcoin, ethereum, blockchain, NFT, ICO, ICO, USDT, عملات رقمية, كريبتو, بيتكوين
+- Trading groups: forex, فوركس, trading signals, توصيات تداول, مضاربة (speculation)
+- IPO / stock offerings: اكتتاب, IPO, أكتتاب
+- Advertising platforms: any group named "منصة" (platform) — these are advertising/investment bots
+- امبات / أمبات — multi-level marketing or investment scheme
+- كابيتال / capital — financial groups
+- Make-money / quick profit groups: ربح سريع, تربح, earn money fast
+- General non-medical: news, religion, politics, entertainment, sports, cooking, business, real estate
+
+If a group mentions BOTH medical terms AND investment/crypto terms, answer "no" — it is likely an advertising group disguised with medical keywords.`;
+
 
 /**
  * Ask Gemini if a group is relevant based on its title and sample messages.
