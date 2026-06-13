@@ -21,6 +21,12 @@ interface CachedClient {
 
 const pool = new Map<string, CachedClient>();
 
+/**
+ * Mutex map: prevents two concurrent getClient() calls for the same phone
+ * from both creating a new connection (race condition → AUTH_KEY_DUPLICATED).
+ */
+const creating = new Map<string, Promise<TelegramClient>>();
+
 let cachedApiId: number | null = null;
 let cachedApiHash: string | null = null;
 
@@ -51,49 +57,82 @@ async function getApiCredentials(): Promise<{ apiId: number; apiHash: string }> 
   return { apiId: dbApiId, apiHash: dbApiHash };
 }
 
+/**
+ * Returns the existing pooled client for this phone WITHOUT creating a new one.
+ * Use this whenever you only want to READ data (e.g. message history) and must
+ * not risk a duplicate connection that would trigger AUTH_KEY_DUPLICATED.
+ * Returns null if no active connection exists for this phone.
+ */
+export function getPooledClientOnly(phone: string): TelegramClient | null {
+  const cached = pool.get(phone);
+  if (cached) {
+    cached.lastUsed = new Date();
+    return cached.client;
+  }
+  return null;
+}
+
 export async function getClient(
   phone: string,
   sessionString?: string | null,
   deviceProfile?: DeviceProfile | null | Record<string, any>
 ): Promise<TelegramClient> {
+  // Return pooled client immediately if it exists
   const cached = pool.get(phone);
   if (cached) {
     cached.lastUsed = new Date();
     return cached.client;
   }
 
-  const { apiId, apiHash } = await getApiCredentials();
-
-  const clientOptions: Record<string, unknown> = {
-    apiId,
-    apiHash,
-    storage: new MemoryStorage(),
-  };
-
-  if (deviceProfile && (deviceProfile as any).deviceModel) {
-    const dp = deviceProfile as DeviceProfile;
-    clientOptions["deviceModel"] = dp.deviceModel;
-    clientOptions["systemVersion"] = dp.systemVersion;
-    clientOptions["appVersion"] = dp.appVersion;
-    clientOptions["systemLangCode"] = dp.systemLangCode;
-    clientOptions["langPack"] = dp.langPack;
+  // Mutex: if another async call is already creating a client for this phone,
+  // wait for it instead of creating a second connection (AUTH_KEY_DUPLICATED).
+  const inFlight = creating.get(phone);
+  if (inFlight) {
+    logger.debug({ phone }, "Waiting for in-flight client creation");
+    return inFlight;
   }
 
-  const client = new TelegramClient(clientOptions as any);
-
-  if (sessionString) {
+  const promise = (async (): Promise<TelegramClient> => {
     try {
-      await client.importSession(sessionString);
-    } catch (err) {
-      logger.warn({ phone, err }, "Failed to import session string, will connect fresh");
+      const { apiId, apiHash } = await getApiCredentials();
+
+      const clientOptions: Record<string, unknown> = {
+        apiId,
+        apiHash,
+        storage: new MemoryStorage(),
+      };
+
+      if (deviceProfile && (deviceProfile as any).deviceModel) {
+        const dp = deviceProfile as DeviceProfile;
+        clientOptions["deviceModel"] = dp.deviceModel;
+        clientOptions["systemVersion"] = dp.systemVersion;
+        clientOptions["appVersion"] = dp.appVersion;
+        clientOptions["systemLangCode"] = dp.systemLangCode;
+        clientOptions["langPack"] = dp.langPack;
+      }
+
+      const client = new TelegramClient(clientOptions as any);
+
+      if (sessionString) {
+        try {
+          await client.importSession(sessionString);
+        } catch (err) {
+          logger.warn({ phone, err }, "Failed to import session string, will connect fresh");
+        }
+      }
+
+      await client.connect();
+
+      pool.set(phone, { client, lastUsed: new Date(), phone });
+      logger.info({ phone, device: (deviceProfile as any)?.deviceModel ?? "default" }, "TelegramClient connected");
+      return client;
+    } finally {
+      creating.delete(phone);
     }
-  }
+  })();
 
-  await client.connect();
-
-  pool.set(phone, { client, lastUsed: new Date(), phone });
-  logger.info({ phone, device: (deviceProfile as any)?.deviceModel ?? "default" }, "TelegramClient connected");
-  return client;
+  creating.set(phone, promise);
+  return promise;
 }
 
 export async function createTempClient(): Promise<TelegramClient> {

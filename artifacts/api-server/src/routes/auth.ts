@@ -16,7 +16,7 @@ import { ObjectId } from "mongodb";
 import { TelegramClient, SentCode } from "@mtcute/node";
 import { collections } from "@workspace/db";
 import { logger } from "../lib/logger.js";
-import { createTempClient, getClient } from "../lib/clientPool.js";
+import { createTempClient, getClient, getPooledClientOnly } from "../lib/clientPool.js";
 
 const router: IRouter = Router();
 
@@ -199,14 +199,27 @@ router.get("/auth/pending-code/:phone", async (req, res): Promise<void> => {
   const afterTs = req.query["after"] ? parseInt(req.query["after"] as string, 10) : 0;
 
   try {
-    const col = await collections.accounts();
-    const account = await col.findOne({ phone });
-    if (!account?.sessionString) {
+    // ── Priority 1: use an ALREADY POOLED client (engine-managed connection).
+    //   Never create a new connection here — creating a new client while the
+    //   engine already has one active for the same phone causes AUTH_KEY_DUPLICATED
+    //   because Telegram detects two connections sharing the same auth key.
+    let client: any = getPooledClientOnly(phone);
+
+    // ── Priority 2: re-auth flow — a pending auth session is in progress.
+    //   The auth route already has a live client for this phone; use it.
+    if (!client) {
+      const pending = pendingAuth.get(phone);
+      if (pending?.client) {
+        client = pending.client;
+      }
+    }
+
+    // ── No active connection at all → return false without connecting.
+    //   The caller (CodeWatchPanel / AuthDialog) should show "not connected" state.
+    if (!client) {
       res.json({ found: false });
       return;
     }
-
-    const client = await getClient(phone, account.sessionString, account as any);
 
     const peer = await (client as any).resolvePeer("777000");
     const result = await (client as any).call({
@@ -237,7 +250,7 @@ router.get("/auth/pending-code/:phone", async (req, res): Promise<void> => {
       }
     }
   } catch (_) {
-    // Session expired or not accessible — fail silently
+    // Read failed (connection issue) — fail silently, do NOT create new connection
   }
 
   res.json({ found: false });

@@ -11,7 +11,7 @@
 
 import { collections, ObjectId } from "@workspace/db";
 import type { InviteRequestDoc } from "@workspace/db";
-import { getClient } from "./clientPool.js";
+import { getPooledClientOnly } from "./clientPool.js";
 import { logger } from "./logger.js";
 import { extractErrorCode } from "./telegramErrors.js";
 import { eventBus } from "./eventBus.js";
@@ -54,9 +54,15 @@ export async function runCheck(): Promise<{ checked: number; approved: number; e
 }
 
 async function checkOne(doc: InviteRequestDoc): Promise<"approved" | "expired" | "pending"> {
-  const accountsCol = await collections.accounts();
-  const account = await accountsCol.findOne({ phone: doc.accountPhone });
-  if (!account?.sessionString) return "pending";
+  // Only use an ALREADY POOLED (engine-managed) client.
+  // Creating a new connection would risk AUTH_KEY_DUPLICATED if the engine
+  // already has an active connection for this phone with the same auth key.
+  const client = getPooledClientOnly(doc.accountPhone);
+  if (!client) {
+    // Account not currently connected — skip this check cycle safely
+    logger.debug({ phone: doc.accountPhone, url: doc.url }, "Invite check skipped — account not in pool");
+    return "pending";
+  }
 
   // Extract invite hash from URL (handles t.me/+HASH and t.me/joinchat/HASH)
   const hashMatch = doc.url.match(/t\.me\/(?:joinchat\/|\+)([a-zA-Z0-9_-]+)/i);
@@ -65,7 +71,6 @@ async function checkOne(doc: InviteRequestDoc): Promise<"approved" | "expired" |
   const hash = hashMatch[1]!;
 
   try {
-    const client = await getClient(account.phone, account.sessionString, account as any);
 
     const info = await (client as any).call({
       _: "messages.checkChatInvite",
