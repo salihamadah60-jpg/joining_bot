@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useState, useEffect, useRef, Fragment } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   useListAccounts,
   useUpdateAccount,
@@ -19,9 +19,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Users, Plus, Trash2, KeyRound, CheckCircle2, XCircle, Wifi, WifiOff, RefreshCw, Radio } from "lucide-react";
+import { Users, Plus, Trash2, KeyRound, CheckCircle2, XCircle, Wifi, WifiOff, RefreshCw, Radio, ChevronDown, ChevronRight, ExternalLink, List, Copy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
+import { ar } from "date-fns/locale";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -54,6 +55,59 @@ function getStatusBadge(status: string, floodWaitUntil?: string | null, hasSessi
   }
 }
 
+// ─── Groups Panel ─────────────────────────────────────────────────────────────
+
+interface GroupEntry {
+  id: string;
+  url: string;
+  groupTitle: string | null;
+  groupType: string | null;
+  joinedAt: string;
+}
+
+function GroupsPanel({ accountId }: { accountId: string }) {
+  const { data: groups = [], isLoading } = useQuery<GroupEntry[]>({
+    queryKey: [`/api/accounts/${accountId}/groups`],
+    queryFn: () => fetch(`/api/accounts/${accountId}/groups`).then((r) => r.json()),
+  });
+
+  if (isLoading) return (
+    <p className="text-xs text-muted-foreground py-2 font-mono">⏳ جاري تحميل المجموعات...</p>
+  );
+
+  if (groups.length === 0) return (
+    <p className="text-xs text-muted-foreground py-2 font-mono">لا توجد مجموعات مسجلة لهذا الحساب في قاعدة البيانات</p>
+  );
+
+  return (
+    <div className="max-h-56 overflow-y-auto space-y-1.5 font-mono">
+      <p className="text-xs text-muted-foreground pb-1">
+        <span className="text-primary font-bold">{groups.length}</span> مجموعة / قناة
+      </p>
+      {groups.map((g) => (
+        <div key={g.id} className="flex items-center gap-2 text-xs">
+          <a
+            href={g.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary hover:underline flex items-center gap-1 truncate max-w-xs"
+            title={g.url}
+          >
+            {g.groupTitle ?? g.url}
+            <ExternalLink className="w-2.5 h-2.5 flex-shrink-0 opacity-60" />
+          </a>
+          {g.groupType && (
+            <Badge variant="outline" className="text-xs py-0 px-1 font-mono">{g.groupType}</Badge>
+          )}
+          <span className="text-muted-foreground flex-shrink-0">
+            {formatDistanceToNow(new Date(g.joinedAt), { addSuffix: true, locale: ar })}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Auth Dialog ──────────────────────────────────────────────────────────────
 
 type AuthStep = "idle" | "sending" | "entering_code" | "entering_password" | "done";
@@ -64,7 +118,32 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [codeLength, setCodeLength] = useState(5);
+  const [otpAutoFound, setOtpAutoFound] = useState(false);
+  const otpPollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { toast } = useToast();
+
+  // ── OTP auto-capture polling ──
+  useEffect(() => {
+    if (step !== "entering_code") {
+      if (otpPollerRef.current) { clearInterval(otpPollerRef.current); otpPollerRef.current = null; }
+      return;
+    }
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/auth/pending-code/${encodeURIComponent(phone)}`);
+        const data = await r.json();
+        if (data.found && data.code && !otpAutoFound) {
+          setCode(data.code);
+          setOtpAutoFound(true);
+          toast({ title: "📱 تم التقاط الكود تلقائياً", description: `الكود: ${data.code}` });
+          if (otpPollerRef.current) { clearInterval(otpPollerRef.current); otpPollerRef.current = null; }
+        }
+      } catch (_) {}
+    };
+    poll();
+    otpPollerRef.current = setInterval(poll, 3000);
+    return () => { if (otpPollerRef.current) { clearInterval(otpPollerRef.current); otpPollerRef.current = null; } };
+  }, [step, phone, otpAutoFound]);
 
   const sendCode = useAuthSendCode();
   const verifyCode = useAuthVerifyCode();
@@ -73,13 +152,12 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
 
   const handleOpen = (o: boolean) => {
     if (!o) {
-      // Cancel any pending auth when dialog closes
-      if (step !== "idle" && step !== "done") {
-        cancel.mutate({ data: { phone } });
-      }
+      if (step !== "idle" && step !== "done") cancel.mutate({ data: { phone } });
       setStep("idle");
       setCode("");
       setPassword("");
+      setOtpAutoFound(false);
+      if (otpPollerRef.current) { clearInterval(otpPollerRef.current); otpPollerRef.current = null; }
     }
     setOpen(o);
   };
@@ -182,9 +260,19 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
         {/* Step: enter OTP */}
         {step === "entering_code" && (
           <div className="space-y-4 py-2">
-            <p className="text-sm text-muted-foreground font-mono">
-              أدخل الرمز المكون من {codeLength} أرقام
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-muted-foreground font-mono flex-1">
+                أدخل الرمز المكون من {codeLength} أرقام
+              </p>
+              {!otpAutoFound && (
+                <p className="text-xs text-yellow-400 font-mono animate-pulse">
+                  🔍 بحث تلقائي...
+                </p>
+              )}
+              {otpAutoFound && (
+                <p className="text-xs text-primary font-mono">✅ كود تلقائي</p>
+              )}
+            </div>
             <div className="flex justify-center" dir="ltr">
               <InputOTP
                 maxLength={codeLength}
@@ -310,6 +398,22 @@ export default function Accounts() {
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [pingingId, setPingingId] = useState<string | null>(null);
   const [pingResults, setPingResults] = useState<Record<string, { ok: boolean; name?: string; error?: string }>>({});
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const reuseJoined = useMutation({
+    mutationFn: async () => {
+      const r = await fetch("/api/links/reuse-joined", { method: "POST" });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json() as Promise<{ added: number; reset: number; skipped: number; total: number }>;
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "✅ تم إعادة إضافة الروابط المنضم إليها",
+        description: `جديد: ${data.added} — أُعيد تفعيله: ${data.reset} — موجود: ${data.skipped} (إجمالي: ${data.total})`,
+      });
+    },
+    onError: (e: any) => toast({ title: "خطأ في إعادة الإضافة", description: e?.message, variant: "destructive" }),
+  });
 
   const pingAccount = useMutation({
     mutationFn: async (id: string) => {
@@ -358,11 +462,24 @@ export default function Accounts() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold font-mono flex items-center gap-2">
           <Users className="w-6 h-6 text-primary" />
           ACCOUNTS_REGISTRY
         </h1>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => reuseJoined.mutate()}
+            disabled={reuseJoined.isPending}
+            className="font-mono text-xs gap-1.5 border-muted-foreground/30 text-muted-foreground hover:text-foreground"
+            title="إعادة إضافة الروابط من JOINED لحسابات جديدة"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            {reuseJoined.isPending ? "جاري..." : "إعادة إضافة JOINED"}
+          </Button>
 
         <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
           <DialogTrigger asChild>
@@ -409,6 +526,7 @@ export default function Accounts() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Needs-auth banner */}
@@ -429,6 +547,7 @@ export default function Accounts() {
           <Table>
             <TableHeader className="bg-muted/50">
               <TableRow className="border-card-border hover:bg-transparent">
+                <TableHead className="font-mono text-xs w-8"></TableHead>
                 <TableHead className="font-mono text-xs">PHONE</TableHead>
                 <TableHead className="font-mono text-xs">LABEL</TableHead>
                 <TableHead className="font-mono text-xs">STATUS</TableHead>
@@ -441,13 +560,26 @@ export default function Accounts() {
             <TableBody className="font-mono">
               {isLoading && (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                     LOADING...
                   </TableCell>
                 </TableRow>
               )}
               {accounts?.map((acc) => (
-                <TableRow key={acc.id} className="border-card-border">
+                <Fragment key={acc.id}>
+                <TableRow className="border-card-border">
+                  <TableCell className="w-8 px-2">
+                    <button
+                      onClick={() => setExpandedId((prev) => prev === acc.id ? null : acc.id)}
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      title="عرض المجموعات المنضم إليها"
+                    >
+                      {expandedId === acc.id
+                        ? <ChevronDown className="w-3.5 h-3.5" />
+                        : <ChevronRight className="w-3.5 h-3.5" />
+                      }
+                    </button>
+                  </TableCell>
                   <TableCell className="font-medium text-sm">
                     <div className="flex items-center gap-2">
                       {acc.hasSession ? (
@@ -548,10 +680,24 @@ export default function Accounts() {
                     </div>
                   </TableCell>
                 </TableRow>
+                {expandedId === acc.id && (
+                  <TableRow className="border-card-border bg-muted/10 hover:bg-muted/10">
+                    <TableCell colSpan={8} className="py-3 px-6">
+                      <div className="border border-border rounded-lg p-3 bg-background">
+                        <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                          <List className="w-3.5 h-3.5 text-primary" />
+                          المجموعات المنضم إليها — {acc.phone}
+                        </p>
+                        <GroupsPanel accountId={acc.id} />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+                </Fragment>
               ))}
               {!isLoading && accounts?.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-24 text-center text-muted-foreground font-mono text-sm">
+                  <TableCell colSpan={8} className="h-24 text-center text-muted-foreground font-mono text-sm">
                     NO_ACCOUNTS — اضغط REGISTER_ACCOUNT للبدء
                   </TableCell>
                 </TableRow>

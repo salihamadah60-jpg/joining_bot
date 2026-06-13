@@ -138,6 +138,17 @@ export interface LearnedPatternDoc {
   updatedAt: Date;
 }
 
+export interface InviteRequestDoc {
+  _id: ObjectId;
+  url: string;
+  accountPhone: string;
+  status: "pending" | "approved" | "expired";
+  groupTitle: string | null;
+  sentAt: Date;
+  approvedAt: Date | null;
+  updatedAt: Date;
+}
+
 // ─── Connection singleton ─────────────────────────────────────────────────────
 
 let _client: MongoClient | null = null;
@@ -194,6 +205,7 @@ export const collections = {
   joinHistory: () => col<JoinHistoryDoc>("join_history"),
   mongoCollections: () => col<MongoCollectionDoc>("mongo_collections"),
   learnedPatterns: () => col<LearnedPatternDoc>("learned_patterns"),
+  inviteRequests: () => col<InviteRequestDoc>("invite_requests"),
 } as const;
 
 // ─── Init: create indexes + ensure bot_state singleton ───────────────────────
@@ -238,6 +250,11 @@ export async function initMongo(): Promise<void> {
 
   // learned_patterns
   await db.collection("learned_patterns").createIndex({ groupTitle: 1 }, { unique: true });
+
+  // invite_requests
+  await db.collection("invite_requests").createIndex({ url: 1, accountPhone: 1 }, { unique: true });
+  await db.collection("invite_requests").createIndex({ status: 1 });
+  await db.collection("invite_requests").createIndex({ sentAt: -1 });
 
   // Ensure bot_state singleton exists
   await db.collection<BotStateDoc>("bot_state").updateOne(

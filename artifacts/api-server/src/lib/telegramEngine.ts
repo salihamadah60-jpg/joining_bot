@@ -459,6 +459,31 @@ async function handleJoinError(account: AccountDoc, link: TargetLinkDoc, err: un
       break;
     }
 
+    case "invite_request": {
+      const inviteCol = await collections.inviteRequests();
+      try {
+        await inviteCol.insertOne({
+          _id: new ObjectId(),
+          url: link.url,
+          accountPhone: account.phone,
+          status: "pending",
+          groupTitle: null,
+          sentAt: new Date(),
+          approvedAt: null,
+          updatedAt: new Date(),
+        });
+      } catch (_) {}
+      await targetLinksCol.updateOne(
+        { _id: link._id },
+        { $set: { status: "invite_request", usedByAccountPhone: account.phone, processedAt: new Date() } }
+      );
+      const invMsg = `📩 طلب انضمام مُرسَل: ${link.url} [${account.phone}]`;
+      await logActivity("invite_request", invMsg, account.phone, link.url, info.code);
+      await logJoinJob(account.phone, link.url, "invite_request", info.code, "في انتظار موافقة المشرف");
+      eventBus.publish({ type: "invite_request", message: invMsg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });
+      break;
+    }
+
     case "auth_revoked": {
       await accountsCol.updateOne({ _id: account._id }, { $set: { status: "needs_auth", sessionString: null, updatedAt: new Date() } });
       await removeClient(account.phone);

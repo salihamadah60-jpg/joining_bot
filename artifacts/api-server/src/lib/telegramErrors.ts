@@ -13,6 +13,7 @@ export type TelegramErrorAction =
   | "already_joined"    // Link already joined (count as success)
   | "auth_revoked"      // Session expired, account needs re-auth
   | "account_banned"    // Account banned by Telegram
+  | "invite_request"    // Invite request sent — awaiting admin approval
   | "unknown";          // Unexpected error, may retry
 
 export interface TelegramErrorInfo {
@@ -102,6 +103,11 @@ export function classifyTelegramError(err: unknown): TelegramErrorInfo {
     return { action: "account_banned", code };
   }
 
+  // Invite request sent — requires admin approval
+  if (code === "INVITE_REQUEST_SENT") {
+    return { action: "invite_request", code };
+  }
+
   // Permanent link failures (link is dead or we're blocked from it)
   if (
     [
@@ -113,7 +119,6 @@ export function classifyTelegramError(err: unknown): TelegramErrorInfo {
       "USER_BANNED_IN_CHANNEL",
       "CHAT_ADMIN_REQUIRED",
       "PEER_ID_INVALID",
-      "INVITE_REQUEST_SENT",
       "JOIN_AS_PEER_INVALID",
       "CHANNEL_ID_INVALID",
       "MSG_ID_INVALID",

@@ -23,7 +23,7 @@ export const SAFE_INTERVAL_PER_ACCOUNT_SECS = Math.ceil(
   (ACTIVE_SECONDS / DAILY_LIMIT) * SAFETY_FACTOR
 ); // ≈ 1029 seconds (~17.2 min)
 
-const MIN_ACTION_INTERVAL_SECS = 180; // never less than 3 min between any two actions
+const MIN_ACTION_INTERVAL_SECS = 30; // never less than 30s — scales naturally with account count
 const JITTER_FACTOR = 0.25; // ±25%
 
 const BLACKOUT_START_HOUR = 2; // 2:00 AM

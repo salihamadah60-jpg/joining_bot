@@ -167,6 +167,10 @@ export default function Settings() {
   // Auto-sync
   const [autoSyncInterval, setAutoSyncInterval] = useState("30");
 
+  // Timing limits
+  const [dailyLimit, setDailyLimit] = useState("85");
+  const [activeHoursCount, setActiveHoursCount] = useState("18");
+
   // Backup
   const [mongoBackupUrl, setMongoBackupUrl] = useState("");
   const [mongoBackupDb, setMongoBackupDb] = useState("tg_backup");
@@ -213,12 +217,18 @@ export default function Settings() {
       const { hour, ampm } = to12(h24);
       setStartHour12(hour);
       setStartAmPm(ampm);
+
+      setDailyLimit(s["default_daily_limit"] ?? "85");
+      setActiveHoursCount(s["active_hours_count"] ?? "18");
     }
   }, [settings]);
 
   // Derived values
   const startH24 = to24(startHour12, startAmPm);
-  const endH24 = (startH24 + 18) % 24;
+  const activeHoursNum = Math.max(6, Math.min(23, Number(activeHoursCount) || 18));
+  const dailyLimitNum = Math.max(10, Math.min(200, Number(dailyLimit) || 85));
+  const endH24 = (startH24 + activeHoursNum) % 24;
+  const safeIntervalSecs = Math.ceil((activeHoursNum * 3600 / dailyLimitNum) * 1.35);
   const currentHour = new Date().getHours();
   const botIsRunning = (botStatus as any)?.running ?? false;
   const forceActiveUntil = (botStatus as any)?.forceActiveUntil
@@ -250,12 +260,19 @@ export default function Settings() {
 
   const handleSaveSchedule = () => {
     updateSettings.mutate(
-      { data: { active_start_hour: String(startH24), auto_sync_interval_minutes: autoSyncInterval } },
+      {
+        data: {
+          active_start_hour: String(startH24),
+          auto_sync_interval_minutes: autoSyncInterval,
+          default_daily_limit: String(dailyLimitNum),
+          active_hours_count: String(activeHoursNum),
+        },
+      },
       {
         onSuccess: () => {
           toast({
             title: "✅ تم حفظ الجدول",
-            description: `البوت يعمل من ${formatHourArFull(startH24)} حتى ${formatHourArFull(endH24)}`,
+            description: `البوت يعمل من ${formatHourArFull(startH24)} حتى ${formatHourArFull(endH24)} — ${dailyLimitNum} انضمام/يوم`,
           });
           refetchSettings();
         },
@@ -451,7 +468,7 @@ export default function Settings() {
               <Clock className="w-3.5 h-3.5 text-primary" />
               خريطة النشاط — 24 ساعة
             </p>
-            <Timeline startHour={startH24} currentHour={currentHour} />
+            <Timeline startHour={startH24} activeHours={activeHoursNum} currentHour={currentHour} />
           </div>
 
           {/* ── Time Picker ── */}
@@ -548,11 +565,78 @@ export default function Settings() {
               <span className={`font-bold ${to12(endH24).ampm === "AM" ? "text-sky-400" : "text-orange-400"}`}>
                 {formatHourArFull(endH24)}
               </span>{" "}
-              (18 ساعة نشاط + 6 ساعات راحة يومياً)
+              ({activeHoursNum} ساعة نشاط + {24 - activeHoursNum} ساعات راحة يومياً)
+            </div>
+          </div>
+
+          {/* ── Daily Limit + Active Hours + Timing Summary ── */}
+          <div className="bg-card border border-border rounded-xl p-4 space-y-4">
+            <p className="text-xs font-semibold text-foreground border-b border-border pb-2 flex items-center gap-2">
+              <Zap className="w-3.5 h-3.5 text-primary" />
+              إعدادات الانضمام والتوقيت
+            </p>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground">الحد اليومي / حساب</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number" min="10" max="200"
+                    value={dailyLimit}
+                    onChange={(e) => setDailyLimit(e.target.value)}
+                    className="h-8 w-20 text-sm font-mono text-center bg-background border-border"
+                    dir="ltr"
+                  />
+                  <span className="text-xs text-muted-foreground">انضمام/يوم</span>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground">ساعات النشاط</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number" min="6" max="23"
+                    value={activeHoursCount}
+                    onChange={(e) => setActiveHoursCount(e.target.value)}
+                    className="h-8 w-20 text-sm font-mono text-center bg-background border-border"
+                    dir="ltr"
+                  />
+                  <span className="text-xs text-muted-foreground">ساعة/يوم</span>
+                </div>
+              </div>
             </div>
 
-            {/* Auto-sync + Save */}
-            <div className="flex items-end gap-4 pt-1">
+            {/* Timing formula summary */}
+            <div className="rounded-lg bg-muted/30 border border-border p-3 space-y-2 text-xs font-mono">
+              <p className="text-muted-foreground">📐 معادلة التوقيت الآمن:</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-background rounded-md p-2 border border-border">
+                  <p className="text-muted-foreground text-[10px]">الفاصل الآمن / حساب</p>
+                  <p className="text-foreground font-bold">~{Math.floor(safeIntervalSecs / 60)} دقيقة</p>
+                  <p className="text-muted-foreground text-[10px]">{safeIntervalSecs} ثانية</p>
+                </div>
+                {[1, 3, 7, 15].map((n) => {
+                  const tick = Math.max(30, Math.floor(safeIntervalSecs / n));
+                  return (
+                    <div key={n} className="bg-background rounded-md p-2 border border-border">
+                      <p className="text-muted-foreground text-[10px]">{n} حسابات نشطة</p>
+                      <p className="text-primary font-bold">تيك كل {tick}ث</p>
+                      <p className="text-muted-foreground text-[10px]">
+                        ~{Math.ceil(activeHoursNum * 3600 / tick * n)} انضمام/يوم
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Auto-sync + Save ── */}
+          <div className="bg-card border border-border rounded-xl p-4 space-y-4">
+            <p className="text-xs font-semibold text-foreground border-b border-border pb-2 flex items-center gap-2">
+              <RefreshCw className="w-3.5 h-3.5 text-primary" />
+              المزامنة والحفظ
+            </p>
+            <div className="flex items-end gap-4">
               <div className="space-y-1.5 flex-shrink-0">
                 <Label className="text-xs font-medium text-muted-foreground">تزامن المجموعات كل</Label>
                 <div className="flex items-center gap-2">

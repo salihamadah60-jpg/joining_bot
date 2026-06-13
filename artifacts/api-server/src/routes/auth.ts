@@ -16,7 +16,7 @@ import { ObjectId } from "mongodb";
 import { TelegramClient, SentCode } from "@mtcute/node";
 import { collections } from "@workspace/db";
 import { logger } from "../lib/logger.js";
-import { createTempClient } from "../lib/clientPool.js";
+import { createTempClient, getClient } from "../lib/clientPool.js";
 
 const router: IRouter = Router();
 
@@ -178,6 +178,56 @@ router.post("/auth/cancel", async (req, res): Promise<void> => {
   const session = pendingAuth.get(phone);
   if (session) { await session.client.destroy().catch(() => {}); pendingAuth.delete(phone); }
   res.json({ cancelled: true });
+});
+
+/**
+ * GET /auth/pending-code/:phone
+ * Tries to auto-capture the OTP code from Telegram service messages (777000).
+ * Works when the account has an existing session string in the DB.
+ * Returns { found: true, code: "12345" } or { found: false }.
+ */
+router.get("/auth/pending-code/:phone", async (req, res): Promise<void> => {
+  const phone = decodeURIComponent(req.params["phone"] ?? "");
+  if (!phone) { res.json({ found: false }); return; }
+
+  try {
+    const col = await collections.accounts();
+    const account = await col.findOne({ phone });
+    if (!account?.sessionString) {
+      res.json({ found: false });
+      return;
+    }
+
+    const client = await getClient(phone, account.sessionString, account as any);
+
+    const peer = await (client as any).resolvePeer("777000");
+    const result = await (client as any).call({
+      _: "messages.getHistory",
+      peer,
+      offsetId: 0,
+      offsetDate: 0,
+      addOffset: 0,
+      limit: 3,
+      maxId: 0,
+      minId: 0,
+      hash: BigInt(0),
+    });
+
+    const messages: any[] = result?.messages ?? [];
+    for (const msg of messages) {
+      const text: string = msg?.message ?? "";
+      // Telegram OTP messages start with the code: "12345 is your login code"
+      const match = text.match(/^(\d{5,6})[\s\n\-–]/);
+      if (match && match[1]) {
+        res.json({ found: true, code: match[1] });
+        return;
+      }
+    }
+  } catch (_) {
+    // Session expired or not accessible — fail silently
+  }
+
+  res.json({ found: false });
 });
 
 export default router;

@@ -11,6 +11,7 @@ import settingsRouter from "./settings";
 import eventsRouter from "./events";
 import analyticsRouter from "./analytics";
 import sessionsRouter from "./sessions";
+import inviteRequestsRouter from "./invite-requests";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(settingsRouter);
 router.use(eventsRouter);
 router.use(analyticsRouter);
 router.use(sessionsRouter);
+router.use(inviteRequestsRouter);
 
 export default router;

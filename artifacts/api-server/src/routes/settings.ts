@@ -52,6 +52,8 @@ router.put("/settings", async (req, res): Promise<void> => {
     "telegram_api_hash",
     "auto_sync_interval_minutes",
     "active_start_hour",
+    "active_hours_count",
+    "default_daily_limit",
     "ai_filter_enabled",
     "mongo_backup_url",
     "mongo_backup_db",

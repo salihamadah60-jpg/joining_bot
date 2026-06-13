@@ -236,4 +236,27 @@ router.post("/accounts/:id/sync-dialogs", async (req, res): Promise<void> => {
   res.json({ channelsCount: count, synced: true });
 });
 
+/** GET /accounts/:id/groups — list all joined groups for an account */
+router.get("/accounts/:id/groups", async (req, res): Promise<void> => {
+  const id = req.params["id"];
+  if (!id || !ObjectId.isValid(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const col = await collections.accounts();
+  const account = await col.findOne({ _id: new ObjectId(id) });
+  if (!account) { res.status(404).json({ error: "Account not found" }); return; }
+
+  const joinedCol = await collections.joined();
+  const groups = await joinedCol
+    .find({ accountPhone: account.phone })
+    .sort({ joinedAt: -1 })
+    .toArray();
+
+  res.json(groups.map((g: any) => ({
+    id: g._id.toString(),
+    url: g.url,
+    groupTitle: g.groupTitle ?? null,
+    groupType: g.groupType ?? null,
+    joinedAt: g.joinedAt ? new Date(g.joinedAt).toISOString() : new Date().toISOString(),
+  })));
+});
+
 export default router;

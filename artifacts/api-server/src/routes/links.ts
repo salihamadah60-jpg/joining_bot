@@ -247,6 +247,71 @@ async function saveLearnedPattern(groupTitle: string, decision: "relevant" | "no
   }
 }
 
+/**
+ * POST /links/reuse-joined
+ * Re-adds links from JOINED collection back to TARGET_LINKS as "pending"
+ * so new accounts can process them. Already-pending links are skipped.
+ * Links with other statuses (joined/failed/skipped) are reset to pending.
+ */
+router.post("/links/reuse-joined", async (req, res): Promise<void> => {
+  const joinedCol = await collections.joined();
+  const targetCol = await collections.targetLinks();
+
+  const joined = await joinedCol.find({}).toArray();
+
+  let added = 0;
+  let reset = 0;
+  let skipped = 0;
+
+  for (const j of joined) {
+    const existing = await targetCol.findOne({ url: j.url });
+    if (existing) {
+      if (existing.status === "pending") {
+        skipped++;
+      } else {
+        await targetCol.updateOne(
+          { _id: existing._id },
+          {
+            $set: {
+              status: "pending",
+              usedByAccountPhone: null,
+              failReason: null,
+              processedAt: null,
+              retryCount: 0,
+              retryAfter: null,
+              updatedAt: new Date(),
+            },
+          }
+        );
+        reset++;
+      }
+    } else {
+      try {
+        await targetCol.insertOne({
+          _id: new ObjectId(),
+          url: j.url,
+          status: "pending",
+          failReason: null,
+          groupTitle: j.groupTitle,
+          groupType: j.groupType,
+          source: "reuse_joined",
+          usedByAccountPhone: null,
+          retryCount: 0,
+          retryAfter: null,
+          createdAt: new Date(),
+          processedAt: null,
+        });
+        added++;
+      } catch (e: any) {
+        if (e.code !== 11000) throw e;
+        skipped++;
+      }
+    }
+  }
+
+  res.json({ added, reset, skipped, total: joined.length });
+});
+
 router.delete("/links/:id", async (req, res): Promise<void> => {
   const id = req.params["id"];
   if (!id || !ObjectId.isValid(id)) { res.status(400).json({ error: "Invalid id" }); return; }
