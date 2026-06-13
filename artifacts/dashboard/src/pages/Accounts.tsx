@@ -547,7 +547,6 @@ export default function Accounts() {
           <Table>
             <TableHeader className="bg-muted/50">
               <TableRow className="border-card-border hover:bg-transparent">
-                <TableHead className="font-mono text-xs w-8"></TableHead>
                 <TableHead className="font-mono text-xs">PHONE</TableHead>
                 <TableHead className="font-mono text-xs">LABEL</TableHead>
                 <TableHead className="font-mono text-xs">STATUS</TableHead>
@@ -560,7 +559,7 @@ export default function Accounts() {
             <TableBody className="font-mono">
               {isLoading && (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
                     LOADING...
                   </TableCell>
                 </TableRow>
@@ -568,28 +567,27 @@ export default function Accounts() {
               {accounts?.map((acc) => (
                 <Fragment key={acc.id}>
                 <TableRow className="border-card-border">
-                  <TableCell className="w-8 px-2">
-                    <button
-                      onClick={() => setExpandedId((prev) => prev === acc.id ? null : acc.id)}
-                      className="text-muted-foreground hover:text-foreground transition-colors"
-                      title="عرض المجموعات المنضم إليها"
-                    >
-                      {expandedId === acc.id
-                        ? <ChevronDown className="w-3.5 h-3.5" />
-                        : <ChevronRight className="w-3.5 h-3.5" />
-                      }
-                    </button>
-                  </TableCell>
                   <TableCell className="font-medium text-sm">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
+                      {/* Expand groups button — clear hit area */}
+                      <button
+                        onClick={() => setExpandedId((prev) => prev === acc.id ? null : acc.id)}
+                        className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        title="عرض المجموعات المنضم إليها"
+                      >
+                        {expandedId === acc.id
+                          ? <ChevronDown className="w-4 h-4" />
+                          : <ChevronRight className="w-4 h-4" />
+                        }
+                      </button>
                       {acc.hasSession ? (
-                        <Wifi className="w-3 h-3 text-primary" />
+                        <Wifi className="w-3 h-3 flex-shrink-0 text-primary" />
                       ) : (
-                        <WifiOff className="w-3 h-3 text-yellow-500" />
+                        <WifiOff className="w-3 h-3 flex-shrink-0 text-yellow-500" />
                       )}
-                      {acc.phone}
+                      <span className="truncate">{acc.phone}</span>
                       {acc.isPremium && (
-                        <Badge variant="outline" className="text-xs text-yellow-500 border-yellow-500">★</Badge>
+                        <Badge variant="outline" className="text-xs text-yellow-500 border-yellow-500 flex-shrink-0">★</Badge>
                       )}
                     </div>
                   </TableCell>
@@ -608,81 +606,70 @@ export default function Accounts() {
                     {acc.channelsCount}
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      {/* Ping — check live connection */}
+                    <div className="flex items-center justify-end gap-1.5">
+                      {/* Ping — icon-only with tooltip */}
                       {acc.hasSession && (
-                        <Button
-                          variant="outline"
-                          size="sm"
+                        <button
                           onClick={() => { setPingingId(acc.id); pingAccount.mutate(acc.id); }}
                           disabled={pingingId === acc.id}
-                          className={`font-mono text-xs gap-1 ${
+                          title="PING — فحص الاتصال بتيليجرام"
+                          className={`w-7 h-7 flex items-center justify-center rounded border transition-colors ${
                             pingResults[acc.id]?.ok === true
                               ? "border-primary/50 text-primary hover:bg-primary/10"
                               : pingResults[acc.id]?.ok === false
                               ? "border-destructive/50 text-destructive hover:bg-destructive/10"
-                              : "border-muted-foreground/30 text-muted-foreground hover:text-foreground"
+                              : "border-muted-foreground/30 text-muted-foreground hover:text-foreground hover:border-muted-foreground/60"
                           }`}
-                          title="فحص الاتصال الحقيقي بتيليجرام"
                         >
                           {pingingId === acc.id ? (
-                            <Radio className="w-3 h-3 animate-pulse" />
+                            <Radio className="w-3.5 h-3.5 animate-pulse" />
                           ) : pingResults[acc.id]?.ok === true ? (
-                            <CheckCircle2 className="w-3 h-3" />
+                            <CheckCircle2 className="w-3.5 h-3.5" />
                           ) : pingResults[acc.id]?.ok === false ? (
-                            <XCircle className="w-3 h-3" />
+                            <XCircle className="w-3.5 h-3.5" />
                           ) : (
-                            <Radio className="w-3 h-3" />
+                            <Radio className="w-3.5 h-3.5" />
                           )}
-                          PING
-                        </Button>
+                        </button>
                       )}
 
-                      {/* Sync dialogs count button */}
+                      {/* Sync — icon-only with tooltip */}
                       {acc.hasSession && (
-                        <Button
-                          variant="outline"
-                          size="sm"
+                        <button
                           onClick={() => { setSyncingId(acc.id); syncDialogs.mutate(acc.id); }}
                           disabled={syncingId === acc.id}
-                          className="font-mono text-xs gap-1 border-muted-foreground/30 text-muted-foreground hover:text-foreground"
-                          title="مزامنة عدد القنوات الحقيقي من تيليجرام"
+                          title="SYNC — مزامنة عدد القنوات"
+                          className="w-7 h-7 flex items-center justify-center rounded border border-muted-foreground/30 text-muted-foreground hover:text-foreground hover:border-muted-foreground/60 transition-colors"
                         >
-                          <RefreshCw className={`w-3 h-3 ${syncingId === acc.id ? "animate-spin" : ""}`} />
-                          SYNC
-                        </Button>
+                          <RefreshCw className={`w-3.5 h-3.5 ${syncingId === acc.id ? "animate-spin" : ""}`} />
+                        </button>
                       )}
 
-                      {/* Auth button — shown for all accounts (can re-auth at any time) */}
+                      {/* Auth button */}
                       <AuthDialog phone={acc.phone} onDone={invalidate} />
 
-                      {/* Pause / resume toggle */}
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-muted-foreground">
-                          {acc.status === "paused" ? "▶" : "⏸"}
-                        </span>
-                        <Switch
-                          checked={acc.status !== "paused" && acc.status !== "banned"}
-                          disabled={acc.status === "banned"}
-                          onCheckedChange={() => handleToggleStatus(acc.id, acc.status)}
-                        />
-                      </div>
+                      {/* Pause / resume toggle — no redundant text label */}
+                      <Switch
+                        checked={acc.status !== "paused" && acc.status !== "banned"}
+                        disabled={acc.status === "banned"}
+                        onCheckedChange={() => handleToggleStatus(acc.id, acc.status)}
+                        title={acc.status === "paused" ? "استئناف الحساب" : "إيقاف مؤقت"}
+                      />
 
                       {/* Delete */}
-                      <Button
-                        variant="ghost"
-                        size="icon"
+                      <button
                         onClick={() => handleDelete(acc.id)}
-                        className="text-destructive hover:bg-destructive/10 hover:text-destructive h-7 w-7"
+                        title="حذف الحساب"
+                        className="w-7 h-7 flex items-center justify-center rounded text-destructive hover:bg-destructive/10 transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
+                      </button>
                     </div>
                   </TableCell>
                 </TableRow>
                 {expandedId === acc.id && (
                   <TableRow className="border-card-border bg-muted/10 hover:bg-muted/10">
-                    <TableCell colSpan={8} className="py-3 px-6">
+                    <TableCell colSpan={7} className="py-3 px-6">
                       <div className="border border-border rounded-lg p-3 bg-background">
                         <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
                           <List className="w-3.5 h-3.5 text-primary" />
@@ -697,7 +684,7 @@ export default function Accounts() {
               ))}
               {!isLoading && accounts?.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center text-muted-foreground font-mono text-sm">
+                  <TableCell colSpan={7} className="h-24 text-center text-muted-foreground font-mono text-sm">
                     NO_ACCOUNTS — اضغط REGISTER_ACCOUNT للبدء
                   </TableCell>
                 </TableRow>
