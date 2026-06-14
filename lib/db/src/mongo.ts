@@ -160,6 +160,16 @@ export interface SyncedDialogDoc {
   syncedAt: Date;
 }
 
+export interface LeftGroupDoc {
+  _id: ObjectId;
+  url: string;
+  accountPhone: string;
+  title: string | null;
+  chatType: string | null;
+  reason: string;
+  leftAt: Date;
+}
+
 // ─── Connection singleton ─────────────────────────────────────────────────────
 
 let _client: MongoClient | null = null;
@@ -218,6 +228,7 @@ export const collections = {
   learnedPatterns: () => col<LearnedPatternDoc>("learned_patterns"),
   inviteRequests: () => col<InviteRequestDoc>("invite_requests"),
   syncedDialogs: () => col<SyncedDialogDoc>("synced_dialogs"),
+  leftGroups: () => col<LeftGroupDoc>("left_groups"),
 } as const;
 
 // ─── Init: create indexes + ensure bot_state singleton ───────────────────────
@@ -272,6 +283,11 @@ export async function initMongo(): Promise<void> {
   await db.collection("synced_dialogs").createIndex({ accountPhone: 1, chatId: 1 }, { unique: true });
   await db.collection("synced_dialogs").createIndex({ accountPhone: 1 });
   await db.collection("synced_dialogs").createIndex({ syncedAt: -1 });
+
+  // left_groups — history of groups that were left
+  await db.collection("left_groups").createIndex({ accountPhone: 1 });
+  await db.collection("left_groups").createIndex({ leftAt: -1 });
+  await db.collection("left_groups").createIndex({ url: 1 });
 
   // Ensure bot_state singleton exists
   await db.collection<BotStateDoc>("bot_state").updateOne(

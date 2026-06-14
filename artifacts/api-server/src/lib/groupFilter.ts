@@ -188,7 +188,7 @@ export function isHardBlocked(
 }
 
 const RELEVANT_KEYWORDS = [
-  // ===== Arabic: Medical =====
+  // ===== Arabic: Medical specialties & procedures =====
   "طب", "طبيب", "أطباء", "اطباء", "طبية",
   "صيدل", "صيدلي", "صيدلان", "صيدلانيات",
   "مستشف", "مستشفى", "عيادة", "عيادات",
@@ -217,6 +217,32 @@ const RELEVANT_KEYWORDS = [
   "طوارئ", "إسعاف", "اسعاف",
   "كلى", "كليه", "غسيل كلى",
   "سكري", "ضغط الدم", "أورام", "اورام", "سرطان",
+  // ===== Arabic: Medical technicians (فني — common Saudi healthcare roles) =====
+  "تجبير",           // orthopedic casting technician
+  "تعقيم",           // CSSD / sterilization technician
+  "ترميز",           // medical coding technician
+  "ترميز طبي",       // medical coding
+  "رعاية مرضى",     // patient care technician (PCT)
+  "فني طبي",         // generic medical technician
+  "مساعد طبيب",      // physician assistant
+  "فني مختبر",       // lab technician
+  "فني أشعة",        // radiology technician
+  "التشغيل العلاجي", // therapeutic operations
+  "التخدير",         // anesthesia
+  "تخدير",           // anesthesia
+  "عناية مركزة",     // ICU
+  "رعاية حرجة",      // critical care
+  // ===== Arabic: Saudi healthcare certifications & exams =====
+  "ستيب",            // STEP (Saudi health specialties exam)
+  "هيئة التخصصات",  // Saudi Commission for Health Specialties
+  "الهيئة السعودية للتخصصات", // full name
+  "برامج الهيئة",   // health commission programs
+  "تخصصات صحية",    // health specialties
+  "برامج صحية",     // health programs
+  "مقابلات برامج",  // program interviews (medical)
+  "مقابلات فني",    // technician interviews (medical)
+  "مقابلات طبية",   // medical interviews
+  "تسريبات",        // exam leaks (common in medical student groups)
   // ===== Arabic: Research/Academic =====
   "بحث", "بحثي", "بحثية", "أبحاث", "ابحاث",
   "علمي", "علمية",
@@ -245,13 +271,22 @@ const RELEVANT_KEYWORDS = [
   "anatomy", "physiology", "biochemistry", "pathology",
   "emergency", "ambulance", "icu",
   "diabetes", "cancer", "tumor",
+  // ===== English: Saudi healthcare acronyms =====
+  "pct",     // patient care technician
+  "cssd",    // central sterile supply department
+  "scfhs",   // saudi commission for health specialties
+  "ecg",     // electrocardiogram
+  "eeg",     // electroencephalogram
+  "step",    // saudi test for health specialties
+  "osce",    // objective structured clinical examination
+  "cbc",     // complete blood count (lab test)
   // ===== English: Research/Academic =====
   "research", "science", "scientific", "study",
   "university", "college", "academic", "education",
   "student", "graduate", "phd", "master",
   "lecture", "curriculum", "thesis", "dissertation",
   "med student", "medstudent",
-  // ===== Student/Scholarship keywords (added for common group names) =====
+  // ===== Student/Scholarship keywords =====
   "students", "scholarship", "scholarships", "admission", "admissions",
   "طلاب الخارج", "ابتعاث", "منح", "دراسة الخارج",
 ];
