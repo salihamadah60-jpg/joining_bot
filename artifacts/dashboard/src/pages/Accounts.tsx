@@ -144,30 +144,6 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
     }, 1000);
   };
 
-  // Debug panel state
-  const [showDebug, setShowDebug] = useState(false);
-  const [debugLoading, setDebugLoading] = useState(false);
-  const [debugData, setDebugData] = useState<Array<{
-    sender: string;
-    status: "ok" | "error";
-    error?: string;
-    messages: Array<{ text: string; date: number; extractedCode: string | null }>;
-  }>>([]);
-
-  const fetchDebugMessages = async () => {
-    setDebugLoading(true);
-    try {
-      const r = await fetch(`/api/auth/debug-messages/${encodeURIComponent(phone)}`);
-      const data = await r.json();
-      setDebugData(data.senders ?? []);
-      setShowDebug(true);
-    } catch (_) {
-      toast({ title: "خطأ", description: "فشل جلب الرسائل التشخيصية", variant: "destructive" });
-    } finally {
-      setDebugLoading(false);
-    }
-  };
-
   // ── OTP auto-capture polling ──
   useEffect(() => {
     if (step !== "entering_code") {
@@ -383,99 +359,6 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
               </Button>
             </div>
 
-            {/* ── Debug Panel ── */}
-            <div className="border border-border rounded-lg overflow-hidden">
-              <button
-                onClick={() => showDebug ? setShowDebug(false) : fetchDebugMessages()}
-                disabled={debugLoading}
-                className="w-full flex items-center gap-2 px-3 py-2 bg-muted/30 hover:bg-muted/50 transition-colors text-xs text-muted-foreground"
-              >
-                <Bug className="w-3 h-3 text-yellow-500 flex-shrink-0" />
-                <span className="flex-1 text-right font-mono">
-                  {debugLoading ? "جاري الجلب..." : "🔬 فحص رسائل المُرسِل (777000 / +42777)"}
-                </span>
-                {showDebug ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-              </button>
-
-              {showDebug && (
-                <div className="p-3 space-y-3 bg-background border-t border-border max-h-64 overflow-y-auto">
-                  {/* Refresh button */}
-                  <button
-                    onClick={fetchDebugMessages}
-                    disabled={debugLoading}
-                    className="text-[10px] text-primary hover:underline font-mono flex items-center gap-1"
-                  >
-                    <RefreshCw className="w-2.5 h-2.5" />
-                    تحديث
-                  </button>
-
-                  {debugData.length === 0 && (
-                    <p className="text-xs text-muted-foreground font-mono">لا توجد بيانات</p>
-                  )}
-
-                  {debugData.map((senderData) => (
-                    <div key={senderData.sender} className="space-y-1.5">
-                      {/* Sender header */}
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[10px] font-bold font-mono px-1.5 py-0.5 rounded ${
-                          senderData.status === "ok"
-                            ? "bg-primary/10 text-primary border border-primary/20"
-                            : "bg-destructive/10 text-destructive border border-destructive/20"
-                        }`}>
-                          {senderData.sender === "777000" ? "Telegram 777000" : "+42777"}
-                        </span>
-                        {senderData.status === "error" && (
-                          <span className="text-[10px] text-destructive font-mono truncate">
-                            ✗ {senderData.error?.substring(0, 40)}
-                          </span>
-                        )}
-                        {senderData.status === "ok" && senderData.messages.length === 0 && (
-                          <span className="text-[10px] text-muted-foreground font-mono">لا رسائل</span>
-                        )}
-                      </div>
-
-                      {/* Messages */}
-                      {senderData.messages.map((msg, idx) => (
-                        <div
-                          key={idx}
-                          className={`rounded-md p-2 border text-xs font-mono space-y-1 ${
-                            msg.extractedCode
-                              ? "border-primary/30 bg-primary/5"
-                              : "border-border bg-muted/20"
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-muted-foreground leading-snug break-all flex-1" dir="ltr">
-                              {msg.text || "(رسالة فارغة)"}
-                            </p>
-                            {msg.extractedCode && (
-                              <button
-                                onClick={() => {
-                                  setCode(msg.extractedCode!);
-                                  setOtpAutoFound(true);
-                                  setShowDebug(false);
-                                  toast({ title: "✅ تم استخدام الكود", description: `الكود: ${msg.extractedCode}` });
-                                }}
-                                className="flex-shrink-0 bg-primary text-primary-foreground text-[10px] font-bold px-2 py-0.5 rounded hover:bg-primary/90 transition-colors"
-                              >
-                                {msg.extractedCode} ←
-                              </button>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-muted-foreground">
-                            {msg.date ? new Date(msg.date * 1000).toLocaleTimeString("ar-SA") : "—"}
-                            {msg.extractedCode
-                              ? <span className="text-primary font-bold mr-2">كود مستخرج: {msg.extractedCode}</span>
-                              : <span className="text-muted-foreground mr-2">لم يُكتشف كود</span>
-                            }
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
         )}
 
@@ -524,115 +407,191 @@ interface CodeWatchPanelProps {
   onClose: () => void;
 }
 
+type DebugSender = {
+  sender: string;
+  status: "ok" | "error";
+  error?: string;
+  messages: Array<{ text: string; date: number; extractedCode: string | null }>;
+};
+
 function CodeWatchPanel({ phone, startedAt, onClose }: CodeWatchPanelProps) {
-  const [code, setCode] = useState<string | null>(null);
-  const [found, setFound] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(300); // 5 minutes
+  const [foundCode, setFoundCode] = useState<string | null>(null);
+  const [autoFound, setAutoFound] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(300);
+  const [debugData, setDebugData] = useState<DebugSender[]>([]);
+  const [debugLoading, setDebugLoading] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<number>(0);
   const { toast } = useToast();
 
   // Countdown timer
   useEffect(() => {
-    if (found) return;
+    if (autoFound) return;
     const t = setInterval(() => setSecondsLeft((prev) => Math.max(0, prev - 1)), 1000);
     return () => clearInterval(t);
-  }, [found]);
+  }, [autoFound]);
 
-  // Polling every 3 seconds for a fresh code from 777000
+  // Fetch raw messages from both senders
+  const fetchRaw = async () => {
+    setDebugLoading(true);
+    try {
+      const r = await fetch(`/api/auth/debug-messages/${encodeURIComponent(phone)}`);
+      const data = await r.json();
+      setDebugData(data.senders ?? []);
+      setLastRefresh(Date.now());
+    } catch { /* ignore */ }
+    finally { setDebugLoading(false); }
+  };
+
+  // Auto-poll: every 4s fetch raw messages (shows live incoming messages)
   useEffect(() => {
-    if (found) return;
+    fetchRaw();
+    const id = setInterval(fetchRaw, 4_000);
+    const stop = setTimeout(() => clearInterval(id), 300_000);
+    return () => { clearInterval(id); clearTimeout(stop); };
+  }, []);
 
+  // Separate polling for extracted code — notify + highlight
+  useEffect(() => {
+    if (autoFound) return;
     let stopped = false;
-
-    const doPoll = async () => {
+    const poll = async () => {
       if (stopped) return;
       try {
-        const r = await fetch(
-          `/api/auth/pending-code/${encodeURIComponent(phone)}?after=${startedAt}`
-        );
-        const data: { found: boolean; code?: string } = await r.json();
+        const r = await fetch(`/api/auth/pending-code/${encodeURIComponent(phone)}?after=${startedAt}`);
+        const data: { found: boolean; code?: string; sender?: string } = await r.json();
         if (data.found && data.code && !stopped) {
           stopped = true;
-          setCode(data.code);
-          setFound(true);
-          toast({
-            title: "🎉 وصل كود التحقق!",
-            description: `الكود: ${data.code} — الحساب ${phone}`,
-            duration: 20_000,
-          });
+          setFoundCode(data.code);
+          setAutoFound(true);
+          toast({ title: "🎉 وصل كود التحقق!", description: `الكود: ${data.code} — ${phone}`, duration: 20_000 });
         }
-      } catch { /* ignore network errors */ }
+      } catch { /* ignore */ }
     };
+    poll();
+    const id = setInterval(poll, 3_000);
+    const stop = setTimeout(() => { stopped = true; clearInterval(id); }, 300_000);
+    return () => { stopped = true; clearInterval(id); clearTimeout(stop); };
+  }, [autoFound]);
 
-    doPoll(); // immediate first check
-    const intervalId = setInterval(doPoll, 3_000);
-    // Auto-stop after 5 minutes
-    const timeoutId = setTimeout(() => { stopped = true; clearInterval(intervalId); }, 300_000);
-
-    return () => {
-      stopped = true;
-      clearInterval(intervalId);
-      clearTimeout(timeoutId);
-    };
-  }, [found]);
-
-  const copyCode = () => {
-    if (!code) return;
-    navigator.clipboard.writeText(code).catch(() => {});
-    toast({ title: "✅ تم نسخ الكود", description: code, duration: 4_000 });
+  const copyCode = (c: string) => {
+    navigator.clipboard.writeText(c).catch(() => {});
+    toast({ title: "✅ تم نسخ الكود", description: c, duration: 4_000 });
   };
 
   const mins = Math.floor(secondsLeft / 60);
   const secs = secondsLeft % 60;
 
+  // Collect all codes found across all senders in debug data
+  const allCodes = debugData.flatMap((s) =>
+    s.messages.filter((m) => m.extractedCode).map((m) => ({ sender: s.sender, code: m.extractedCode!, date: m.date, text: m.text }))
+  );
+
   return (
-    <div className="flex flex-wrap items-center gap-3 py-1 font-mono" dir="rtl">
-      {!found ? (
-        <>
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-primary animate-pulse flex-shrink-0" />
-            <span className="text-xs text-muted-foreground">
-              في انتظار كود التحقق من
+    <div className="space-y-3 font-mono" dir="rtl">
+
+      {/* ── Status bar ── */}
+      <div className="flex flex-wrap items-center gap-3 py-1">
+        {autoFound ? (
+          <>
+            <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+            <span className="text-xs text-muted-foreground">كود التحقق:</span>
+            <span className="text-xl font-bold tracking-[0.4em] text-primary bg-primary/10 border border-primary/40 px-4 py-1 rounded-md select-all cursor-text">
+              {foundCode}
             </span>
-            <span className="text-xs font-bold text-primary">777000</span>
-            <span className="text-xs text-muted-foreground/50">({phone})</span>
-          </div>
-          {secondsLeft > 0 ? (
-            <span className="text-xs text-muted-foreground/60 bg-muted px-2 py-0.5 rounded">
+            <button
+              onClick={() => copyCode(foundCode!)}
+              className="flex items-center gap-1.5 text-sm bg-primary text-primary-foreground px-3 py-1.5 rounded hover:bg-primary/90 transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5" /> نسخ
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse flex-shrink-0" />
+            <span className="text-xs text-muted-foreground">في انتظار كود من تيليجرام...</span>
+            <span className="text-xs text-muted-foreground/50 bg-muted px-2 py-0.5 rounded">
               {mins}:{secs.toString().padStart(2, "0")} متبقي
             </span>
-          ) : (
-            <span className="text-xs text-yellow-500">انتهى وقت الانتظار — لم يصل كود</span>
+          </>
+        )}
+        <button onClick={onClose} className="text-xs text-muted-foreground hover:text-foreground underline mr-auto">
+          إغلاق
+        </button>
+      </div>
+
+      {/* ── Raw messages from both senders ── */}
+      <div className="border border-border rounded-lg overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-2 bg-muted/20 border-b border-border">
+          <Bug className="w-3 h-3 text-yellow-500" />
+          <span className="text-[11px] text-muted-foreground flex-1">رسائل المُرسِل — 777000 / +42777</span>
+          <button
+            onClick={fetchRaw}
+            disabled={debugLoading}
+            className="flex items-center gap-1 text-[10px] text-primary hover:underline"
+          >
+            <RefreshCw className={`w-2.5 h-2.5 ${debugLoading ? "animate-spin" : ""}`} />
+            {lastRefresh ? `آخر تحديث: ${new Date(lastRefresh).toLocaleTimeString("ar-SA")}` : "تحديث"}
+          </button>
+        </div>
+
+        <div className="max-h-72 overflow-y-auto p-3 space-y-3 bg-background">
+          {debugData.length === 0 && (
+            <p className="text-xs text-muted-foreground text-center py-4">
+              {debugLoading ? "جاري الجلب..." : "لا توجد رسائل بعد"}
+            </p>
           )}
-          <button
-            onClick={onClose}
-            className="text-xs text-muted-foreground hover:text-foreground underline"
-          >
-            إلغاء
-          </button>
-        </>
-      ) : (
-        <>
-          <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
-          <span className="text-xs text-muted-foreground">كود التحقق:</span>
-          <span className="text-xl font-bold tracking-[0.4em] text-primary bg-primary/10 border border-primary/40 px-4 py-1 rounded-md select-all cursor-text">
-            {code}
-          </span>
-          <button
-            onClick={copyCode}
-            className="flex items-center gap-1.5 text-sm bg-primary text-primary-foreground px-3 py-1.5 rounded hover:bg-primary/90 transition-colors"
-          >
-            <Copy className="w-3.5 h-3.5" />
-            نسخ الكود
-          </button>
-          <span className="text-xs text-muted-foreground/50">({phone})</span>
-          <button
-            onClick={onClose}
-            className="text-xs text-muted-foreground hover:text-foreground underline"
-          >
-            إغلاق
-          </button>
-        </>
-      )}
+
+          {debugData.map((senderData) => (
+            <div key={senderData.sender} className="space-y-1.5">
+              {/* Sender label */}
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                  senderData.status === "ok"
+                    ? "bg-primary/10 text-primary border-primary/20"
+                    : "bg-destructive/10 text-destructive border-destructive/20"
+                }`}>
+                  {senderData.sender === "777000" ? "Telegram 777000" : "+42777"}
+                </span>
+                {senderData.status === "error" && (
+                  <span className="text-[10px] text-destructive truncate">✗ {senderData.error?.substring(0, 50)}</span>
+                )}
+                {senderData.status === "ok" && senderData.messages.length === 0 && (
+                  <span className="text-[10px] text-muted-foreground">لا رسائل</span>
+                )}
+              </div>
+
+              {/* Messages */}
+              {senderData.messages.map((msg, idx) => (
+                <div key={idx} className={`rounded-md p-2 border text-xs space-y-1 ${
+                  msg.extractedCode ? "border-primary/40 bg-primary/5" : "border-border bg-muted/10"
+                }`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-muted-foreground leading-snug break-all flex-1 text-[11px]" dir="ltr">
+                      {msg.text || "(رسالة فارغة)"}
+                    </p>
+                    {msg.extractedCode && (
+                      <button
+                        onClick={() => copyCode(msg.extractedCode!)}
+                        className="flex-shrink-0 flex items-center gap-1 bg-primary text-primary-foreground text-[10px] font-bold px-2 py-1 rounded hover:bg-primary/90 transition-colors"
+                      >
+                        <Copy className="w-2.5 h-2.5" />
+                        {msg.extractedCode}
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <span>{msg.date ? new Date(msg.date * 1000).toLocaleTimeString("ar-SA") : "—"}</span>
+                    {msg.extractedCode
+                      ? <span className="text-primary font-bold">كود: {msg.extractedCode}</span>
+                      : <span>لم يُكتشف كود</span>
+                    }
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -709,6 +668,23 @@ export default function Accounts() {
   const startCodeWatcher = (id: string) => {
     setCodeWatcherId(id);
     setCodeWatchStart(Math.floor(Date.now() / 1000));
+  };
+
+  // Inline label editing
+  const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
+  const [editingLabelValue, setEditingLabelValue] = useState("");
+
+  const startLabelEdit = (id: string, current: string) => {
+    setEditingLabelId(id);
+    setEditingLabelValue(current || "");
+  };
+
+  const saveLabelEdit = (id: string) => {
+    if (editingLabelId !== id) return;
+    updateAccount.mutate(
+      { id, data: { label: editingLabelValue.trim() } },
+      { onSettled: () => { setEditingLabelId(null); invalidate(); } }
+    );
   };
 
   const reuseJoined = useMutation({
@@ -902,7 +878,30 @@ export default function Accounts() {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-xs">{acc.label || "—"}</TableCell>
+                  <TableCell className="text-xs">
+                    {editingLabelId === acc.id ? (
+                      <Input
+                        autoFocus
+                        value={editingLabelValue}
+                        onChange={(e) => setEditingLabelValue(e.target.value)}
+                        onBlur={() => saveLabelEdit(acc.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveLabelEdit(acc.id);
+                          if (e.key === "Escape") setEditingLabelId(null);
+                        }}
+                        className="h-6 text-xs px-1.5 bg-background border-primary/50 w-24 font-mono"
+                        dir="rtl"
+                      />
+                    ) : (
+                      <button
+                        onClick={() => startLabelEdit(acc.id, acc.label ?? "")}
+                        title="اضغط لتعديل التسمية"
+                        className="text-muted-foreground hover:text-foreground transition-colors min-w-[3rem] text-right"
+                      >
+                        {acc.label || <span className="opacity-30 font-mono text-[10px]">+ تسمية</span>}
+                      </button>
+                    )}
+                  </TableCell>
                   <TableCell>{getStatusBadge(acc.status, acc.floodWaitUntil, acc.hasSession)}</TableCell>
                   <TableCell className="text-right text-xs">
                     <span className="text-primary">{acc.joinedToday}</span>
