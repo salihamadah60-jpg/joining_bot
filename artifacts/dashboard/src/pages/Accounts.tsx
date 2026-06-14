@@ -125,6 +125,25 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
   // timestamp (Unix seconds) when send-code was called — used to filter old codes
   const sendCodeTimestampRef = useRef<number>(0);
 
+  // Resend cooldown (seconds remaining before resend is allowed)
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const resendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startResendCooldown = (seconds = 60) => {
+    setResendCooldown(seconds);
+    if (resendTimerRef.current) clearInterval(resendTimerRef.current);
+    resendTimerRef.current = setInterval(() => {
+      setResendCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(resendTimerRef.current!);
+          resendTimerRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
   // Debug panel state
   const [showDebug, setShowDebug] = useState(false);
   const [debugLoading, setDebugLoading] = useState(false);
@@ -207,10 +226,40 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
           }
           setCodeLength(res.length ?? 5);
           setStep("entering_code");
+          startResendCooldown(60);
         },
         onError: (e: any) => {
           setStep("idle");
           toast({ title: "❌ خطأ", description: e?.message ?? "فشل إرسال الكود", variant: "destructive" });
+        },
+      }
+    );
+  };
+
+  const handleResend = () => {
+    setCode("");
+    setOtpAutoFound(false);
+    setShowDebug(false);
+    setDebugData([]);
+    // Clear old polling
+    if (otpPollerRef.current) { clearInterval(otpPollerRef.current); otpPollerRef.current = null; }
+    sendCodeTimestampRef.current = Math.floor(Date.now() / 1000);
+    sendCode.mutate(
+      { data: { phone } },
+      {
+        onSuccess: (res) => {
+          if (res.alreadyLoggedIn) {
+            setStep("done");
+            toast({ title: "✅ الحساب متصل", description: "تم التحقق من الجلسة بنجاح" });
+            onDone();
+            return;
+          }
+          setCodeLength(res.length ?? 5);
+          startResendCooldown(60);
+          toast({ title: "📱 أُعيد إرسال الكود", description: "ترقّب رمزاً جديداً" });
+        },
+        onError: (e: any) => {
+          toast({ title: "❌ خطأ", description: e?.message ?? "فشل إعادة الإرسال", variant: "destructive" });
         },
       }
     );
@@ -313,13 +362,26 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
               </InputOTP>
             </div>
 
-            <Button
-              onClick={handleVerifyCode}
-              disabled={code.length < codeLength || verifyCode.isPending}
-              className="w-full font-mono"
-            >
-              {verifyCode.isPending ? "جاري التحقق..." : "تأكيد الرمز"}
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleVerifyCode}
+                disabled={code.length < codeLength || verifyCode.isPending}
+                className="flex-1 font-mono"
+              >
+                {verifyCode.isPending ? "جاري التحقق..." : "تأكيد الرمز"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleResend}
+                disabled={resendCooldown > 0 || sendCode.isPending}
+                className="font-mono text-xs border-muted-foreground/30 text-muted-foreground hover:text-foreground whitespace-nowrap"
+                title="إعادة إرسال رمز جديد"
+              >
+                {resendCooldown > 0
+                  ? `${resendCooldown}s`
+                  : sendCode.isPending ? "..." : "🔄 إعادة"}
+              </Button>
+            </div>
 
             {/* ── Debug Panel ── */}
             <div className="border border-border rounded-lg overflow-hidden">
