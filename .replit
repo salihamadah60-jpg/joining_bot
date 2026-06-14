@@ -35,7 +35,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/dashboard run dev"
+args = "PATH=\"/home/runner/workspace/node_modules/.pnpm/node_modules/.bin:$PATH\" pnpm --filter @workspace/dashboard run dev"
 waitForPort = 5000
 
 [[workflows.workflow]]
@@ -62,10 +62,6 @@ timeoutMs = 20000
 [[ports]]
 localPort = 5000
 externalPort = 80
-
-[[ports]]
-localPort = 8080
-externalPort = 8080
 
 [[ports]]
 localPort = 8081
