@@ -9,6 +9,3 @@ if [ -d "node_modules" ]; then
 else
   pnpm install --frozen-lockfile
 fi
-
-# Push DB schema (non-interactive, uses drizzle-kit push --force)
-pnpm --filter @workspace/db run push-force 2>/dev/null || pnpm --filter @workspace/db run push
