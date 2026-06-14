@@ -58,10 +58,10 @@ catalogs:
       specifier: ^4.1.14
       version: 4.3.0
     tsx:
-      specifier: ^4.21.0
+      specifier: 4.21.0
       version: 4.21.0
     vite:
-      specifier: ^7.3.2
+      specifier: 7.3.3
       version: 7.3.3
     zod:
       specifier: ^3.25.76
@@ -153,6 +153,10 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      tsx:
+        specifier: 'catalog:'
+        version: 4.21.0
     devDependencies:
       prettier:
         specifier: ^3.8.3
@@ -2572,7 +2576,7 @@ packages:
     resolution: {integrity: sha512-3qT/88Y3FbH/Kx4szpQQ4HzUbVrHPKTLVpVocKiLfoYvw9XSGOX2FmD2d6DrXbVYyAQTF2HeF6My8jmzx7/CRw==}
 
   npm-run-path@6.0.0:
-    resolution: {integrity: sha512-9qny7Z9DsQU8Ou39ERsPU4OZQlSTP47ShQzuKZ6PRXpYLtIFgl/DEBYEXKlvcEa+9tHVcK8CF81Y2V72qaZhWA==, tarball: https://registry.npmjs.org/npm-run-path/-/npm-run-path-6.0.0.tgz}
+    resolution: {integrity: sha512-9qny7Z9DsQU8Ou39ERsPU4OZQlSTP47ShQzuKZ6PRXpYLtIFgl/DEBYEXKlvcEa+9tHVcK8CF81Y2V72qaZhWA==}
     engines: {node: '>=18'}
 
   object-assign@4.1.1:
