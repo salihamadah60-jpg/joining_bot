@@ -160,9 +160,15 @@ export default function Settings() {
   // AI filter
   const [aiFilterEnabled, setAiFilterEnabled] = useState(false);
 
-  // Schedule — user picks STOP time (blackout start), start is auto-calculated
-  const [stopHour12, setStopHour12] = useState(2);   // 1-12
-  const [stopAmPm, setStopAmPm] = useState<"AM" | "PM">("AM");
+  // Schedule — user picks both START and END times freely (no auto-calculation)
+  const [startHour12, setStartHour12] = useState(8);
+  const [startAmPm, setStartAmPm] = useState<"AM" | "PM">("AM");
+  const [endHour12, setEndHour12] = useState(2);
+  const [endAmPm, setEndAmPm] = useState<"AM" | "PM">("AM");
+  // Force resume with custom hours
+  const [forceHoursInput, setForceHoursInput] = useState("4");
+  // Which time picker is active
+  const [activePicker, setActivePicker] = useState<"start" | "end">("start");
 
   // Auto-sync
   const [autoSyncInterval, setAutoSyncInterval] = useState("30");
@@ -213,33 +219,35 @@ export default function Settings() {
       setMongoBackupUrl(s["mongo_backup_url"] ?? "");
       setMongoBackupDb(s["mongo_backup_db"] ?? "tg_backup");
 
-        // Load stop time (blackout_start_hour). Fallback: derive from active_start_hour.
-      const activeHoursNum = Math.max(6, Math.min(23, Number(s["active_hours_count"] ?? 18)));
-      let stopH24: number;
+      // Load start time
+      const rawStart = Number(s["active_start_hour"] ?? 8);
+      const { hour: sH, ampm: sA } = to12(rawStart);
+      setStartHour12(sH);
+      setStartAmPm(sA);
+
+      // Load end time (blackout_start_hour = when bot stops)
+      let rawEnd: number;
       if (s["blackout_start_hour"] !== undefined) {
-        stopH24 = Number(s["blackout_start_hour"]);
+        rawEnd = Number(s["blackout_start_hour"]);
       } else {
-        // Backward compat: derive stop from start + active_hours
-        const startH24 = Number(s["active_start_hour"] ?? 8);
-        stopH24 = (startH24 + activeHoursNum) % 24;
+        const ah = Math.max(1, Math.min(23, Number(s["active_hours_count"] ?? 18)));
+        rawEnd = (rawStart + ah) % 24;
       }
-      const { hour: stopH, ampm: stopA } = to12(stopH24);
-      setStopHour12(stopH);
-      setStopAmPm(stopA);
+      const { hour: eH, ampm: eA } = to12(rawEnd);
+      setEndHour12(eH);
+      setEndAmPm(eA);
 
       setDailyLimit(s["default_daily_limit"] ?? "85");
       setActiveHoursCount(s["active_hours_count"] ?? "18");
     }
   }, [settings]);
 
-  // Derived values
-  // stopH24 = when the bot stops (user sets this)
-  const stopH24 = to24(stopHour12, stopAmPm);
-  const activeHoursNum = Math.max(6, Math.min(23, Number(activeHoursCount) || 18));
-  const sleepHoursNum = 24 - activeHoursNum;
-  // startH24 = auto-calculated from stop time + sleep duration
-  const startH24 = ((stopH24 + sleepHoursNum) % 24 + 24) % 24;
-  const dailyLimitNum = Math.max(10, Math.min(200, Number(dailyLimit) || 85));
+  // Derived values — both times user-chosen, no auto-calculation
+  const startH24 = to24(startHour12, startAmPm);
+  const endH24 = to24(endHour12, endAmPm);
+  // Active hours = time from start to end (wraps midnight)
+  const activeHoursNum = ((endH24 - startH24) + 24) % 24 || 24;
+  const dailyLimitNum = Math.max(10, Math.min(500, Number(dailyLimit) || 85));
   const safeIntervalSecs = Math.ceil((activeHoursNum * 3600 / dailyLimitNum) * 1.35);
   const currentHour = new Date().getHours();
   const botIsRunning = (botStatus as any)?.running ?? false;
@@ -274,18 +282,18 @@ export default function Settings() {
     updateSettings.mutate(
       {
         data: {
-          blackout_start_hour: String(stopH24),     // NEW: stop time (when bot sleeps)
-          active_start_hour: String(startH24),       // keep for backward compat
+          active_start_hour: String(startH24),
+          blackout_start_hour: String(endH24),
+          active_hours_count: String(activeHoursNum),
           auto_sync_interval_minutes: autoSyncInterval,
           default_daily_limit: String(dailyLimitNum),
-          active_hours_count: String(activeHoursNum),
         },
       },
       {
         onSuccess: () => {
           toast({
             title: "✅ تم حفظ الجدول",
-            description: `البوت يتوقف ${formatHourArFull(stopH24)} ويبدأ ${formatHourArFull(startH24)} — ${dailyLimitNum} انضمام/يوم`,
+            description: `يعمل من ${formatHourArFull(startH24)} حتى ${formatHourArFull(endH24)} (${activeHoursNum}ساعة) — ${dailyLimitNum}/يوم`,
           });
           refetchSettings();
         },
@@ -384,268 +392,228 @@ export default function Settings() {
         </TabsList>
 
         {/* ══════════════════════════════════════════
-            TAB 1: Schedule — the main redesign
+            TAB 1: Schedule
         ══════════════════════════════════════════ */}
         <TabsContent value="schedule" className="space-y-4 mt-0">
 
-          {/* ── Live clock + current status ── */}
+          {/* ── Live clock + status ── */}
           <div className={`rounded-xl border p-4 flex items-center justify-between ${
-            isForceActive
-              ? "bg-yellow-500/10 border-yellow-500/40"
-              : isCurrentlyInActiveWindow
-              ? "bg-primary/10 border-primary/30"
-              : "bg-muted/30 border-border"
+            isForceActive ? "bg-yellow-500/10 border-yellow-500/40"
+            : isCurrentlyInActiveWindow ? "bg-primary/10 border-primary/30"
+            : "bg-muted/30 border-border"
           }`}>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">الوقت الحالي</p>
+            <div>
+              <p className="text-[10px] text-muted-foreground mb-1">الوقت الحالي</p>
               <LiveClock />
             </div>
-
-            <div className="text-right space-y-1">
-              <p className="text-xs text-muted-foreground">حالة البوت</p>
+            <div className="text-right">
+              <p className="text-[10px] text-muted-foreground mb-1">حالة البوت</p>
               {isForceActive ? (
-                <div>
-                  <Badge className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 text-xs gap-1">
-                    <Zap className="w-3 h-3" /> تشغيل مؤقت
-                  </Badge>
-                  <p className="text-[10px] text-yellow-400/80 mt-1">
-                    حتى {formatHourArFull(forceActiveUntil!.getHours())}
-                  </p>
-                </div>
+                <Badge className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 text-xs gap-1">
+                  <Zap className="w-3 h-3" /> تشغيل مؤقت حتى {formatHourArFull(forceActiveUntil!.getHours())}
+                </Badge>
               ) : isCurrentlyInActiveWindow ? (
-                <div>
-                  <Badge className="bg-primary/20 text-primary border border-primary/30 text-xs gap-1">
-                    <Sun className="w-3 h-3" /> وقت النشاط
-                  </Badge>
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    ينتهي الساعة {formatHourArFull(stopH24)}
-                  </p>
-                </div>
+                <Badge className="bg-primary/20 text-primary border border-primary/30 text-xs gap-1">
+                  <Sun className="w-3 h-3" /> نشط — ينتهي {formatHourArFull(endH24)}
+                </Badge>
               ) : (
-                <div>
-                  <Badge variant="secondary" className="text-xs gap-1 border border-border">
-                    <Moon className="w-3 h-3" /> وقت الراحة
-                  </Badge>
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    يستيقظ الساعة {formatHourArFull(startH24)}
-                  </p>
-                </div>
+                <Badge variant="secondary" className="text-xs gap-1 border border-border">
+                  <Moon className="w-3 h-3" /> راحة — يبدأ {formatHourArFull(startH24)}
+                </Badge>
               )}
             </div>
           </div>
 
-          {/* ── FORCE RESUME — always visible so user can run bot anytime ── */}
-          <div className={`rounded-xl border p-4 space-y-3 ${
-            isForceActive
-              ? "border-yellow-500/40 bg-yellow-500/5"
-              : isBlackout
-              ? "border-orange-500/30 bg-orange-500/5"
-              : "border-primary/20 bg-primary/5"
-          }`}>
-            <div className="flex items-start gap-2">
-              <Zap className={`w-4 h-4 mt-0.5 flex-shrink-0 ${isForceActive ? "text-yellow-400" : isBlackout ? "text-orange-400" : "text-primary"}`} />
-              <div className="flex-1">
-                <p className={`text-sm font-medium ${isForceActive ? "text-yellow-400" : isBlackout ? "text-orange-400" : "text-foreground"}`}>
-                  {isForceActive
-                    ? `تشغيل مؤقت نشط حتى ${formatHourArFull(forceActiveUntil!.getHours())}`
-                    : isBlackout
-                    ? "البوت في وقت راحة — يمكنك تشغيله الآن"
-                    : "تشغيل مؤقت — يمكنك تمديد وقت العمل"}
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  يتجاوز جدول الراحة لمدة محددة ثم يعود تلقائياً للجدول المعتاد
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              {[1, 2, 3, 4, 6, 8].map((h) => (
-                <Button
-                  key={h}
-                  size="sm"
-                  onClick={() => forceResume.mutate(h)}
-                  disabled={forceResume.isPending}
-                  className={`font-mono text-xs gap-1.5 ${
-                    isForceActive
-                      ? "bg-yellow-500/20 text-yellow-300 border border-yellow-500/40 hover:bg-yellow-500/30"
-                      : isBlackout
-                      ? "bg-orange-500/20 text-orange-300 border border-orange-500/40 hover:bg-orange-500/30"
-                      : "bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20"
-                  }`}
-                  variant="outline"
-                >
-                  <Play className="w-3 h-3" />
-                  {h} {h === 1 ? "ساعة" : "ساعات"}
-                </Button>
-              ))}
-            </div>
-          </div>
-
-          {/* ── 24-hour visual timeline ── */}
+          {/* ── Timeline ── */}
           <div className="bg-card border border-border rounded-xl p-4 space-y-3">
             <p className="text-xs font-semibold text-foreground border-b border-border pb-2 flex items-center gap-2">
               <Clock className="w-3.5 h-3.5 text-primary" />
-              خريطة النشاط — 24 ساعة
+              خريطة النشاط — 24 ساعة ({activeHoursNum}ساعة نشاط)
             </p>
             <Timeline startHour={startH24} activeHours={activeHoursNum} currentHour={currentHour} />
           </div>
 
-          {/* ── Time Picker — user sets STOP time, start is auto-calculated ── */}
+          {/* ── Time Picker — START + END both freely chosen ── */}
           <div className="bg-card border border-border rounded-xl p-4 space-y-4">
-            <p className="text-xs font-semibold text-foreground border-b border-border pb-2 flex items-center gap-2">
-              <Moon className="w-3.5 h-3.5 text-primary" />
-              ضبط وقت التوقف (وقت النوم)
-            </p>
-
-            {/* Stop / Start summary — stop is editable, start is auto */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-center">
-                <p className="text-[10px] text-muted-foreground mb-1">⏸ وقت التوقف (أنت تحدده)</p>
-                <p className="text-xl font-bold text-foreground font-mono">
-                  {String(stopHour12).padStart(2, "0")}:00
-                </p>
-                <p className={`text-sm font-bold mt-0.5 ${stopAmPm === "AM" ? "text-sky-400" : "text-orange-400"}`}>
-                  {stopAmPm === "AM" ? "🌙 صباحاً" : "🌆 مساءً"}
-                </p>
-              </div>
-              <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-center">
-                <p className="text-[10px] text-muted-foreground mb-1">▶ وقت البداية (تلقائي)</p>
-                <p className="text-xl font-bold text-primary font-mono">
-                  {String(to12(startH24).hour).padStart(2, "0")}:00
-                </p>
-                <p className={`text-sm font-bold mt-0.5 ${to12(startH24).ampm === "AM" ? "text-sky-400" : "text-orange-400"}`}>
-                  {to12(startH24).ampm === "AM" ? "🌅 صباحاً" : "🌆 مساءً"}
-                </p>
-                <p className="text-[9px] text-muted-foreground mt-1">
-                  = وقت التوقف + {sleepHoursNum}h نوم
-                </p>
-              </div>
+            {/* Tab switcher: Start / End */}
+            <div className="flex rounded-lg overflow-hidden border border-border">
+              <button
+                onClick={() => setActivePicker("start")}
+                className={`flex-1 py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${
+                  activePicker === "start"
+                    ? "bg-primary/15 text-primary border-b-2 border-primary"
+                    : "text-muted-foreground hover:bg-muted/30"
+                }`}
+              >
+                <Play className="w-3.5 h-3.5" />
+                وقت البداية
+                <span className="font-mono text-xs opacity-80 bg-primary/10 px-1.5 py-0.5 rounded">
+                  {formatHourArFull(startH24)}
+                </span>
+              </button>
+              <div className="w-px bg-border" />
+              <button
+                onClick={() => setActivePicker("end")}
+                className={`flex-1 py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${
+                  activePicker === "end"
+                    ? "bg-destructive/10 text-red-400 border-b-2 border-red-400"
+                    : "text-muted-foreground hover:bg-muted/30"
+                }`}
+              >
+                <Moon className="w-3.5 h-3.5" />
+                وقت التوقف
+                <span className="font-mono text-xs opacity-80 bg-destructive/10 px-1.5 py-0.5 rounded">
+                  {formatHourArFull(endH24)}
+                </span>
+              </button>
             </div>
 
-            {/* Hour picker: AM/PM toggle + hour buttons */}
-            <div className="space-y-3">
-              <p className="text-[10px] text-muted-foreground font-semibold">اختر وقت التوقف:</p>
-              {/* AM / PM toggle */}
-              <div className="flex rounded-lg overflow-hidden border border-border w-full">
-                <button
-                  onClick={() => setStopAmPm("AM")}
-                  className={`flex-1 py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${
-                    stopAmPm === "AM"
-                      ? "bg-sky-500/20 text-sky-400 border-b-2 border-sky-400"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
-                  }`}
-                >
-                  🌙 صباحاً (AM)
-                  <span className="text-xs font-mono opacity-60">12 – 11</span>
-                </button>
-                <div className="w-px bg-border" />
-                <button
-                  onClick={() => setStopAmPm("PM")}
-                  className={`flex-1 py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${
-                    stopAmPm === "PM"
-                      ? "bg-orange-500/20 text-orange-400 border-b-2 border-orange-400"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
-                  }`}
-                >
-                  🌆 مساءً (PM)
-                  <span className="text-xs font-mono opacity-60">12 – 11</span>
-                </button>
-              </div>
-
-              {/* Hour selector grid — 1 to 12 */}
-              <div className="grid grid-cols-6 gap-1.5">
-                {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((h) => {
-                  const isSelected = stopHour12 === h;
-                  return (
-                    <button
-                      key={h}
-                      onClick={() => setStopHour12(h)}
-                      className={`py-2 rounded-lg text-sm font-bold font-mono transition-all ${
-                        isSelected
-                          ? stopAmPm === "AM"
-                            ? "bg-sky-500/30 text-sky-300 border-2 border-sky-400 shadow-sm"
-                            : "bg-orange-500/30 text-orange-300 border-2 border-orange-400 shadow-sm"
+            {/* AM / PM */}
+            {activePicker === "start" ? (
+              <div className="space-y-3">
+                <div className="flex rounded-lg overflow-hidden border border-border">
+                  {(["AM", "PM"] as const).map((p) => (
+                    <button key={p} onClick={() => setStartAmPm(p)}
+                      className={`flex-1 py-2 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                        startAmPm === p
+                          ? p === "AM" ? "bg-sky-500/20 text-sky-400 border-b-2 border-sky-400"
+                            : "bg-orange-500/20 text-orange-400 border-b-2 border-orange-400"
+                          : "text-muted-foreground hover:bg-muted/30"
+                      }`}>
+                      {p === "AM" ? "🌅 صباحاً" : "🌆 مساءً"}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-6 gap-1.5">
+                  {[12,1,2,3,4,5,6,7,8,9,10,11].map((h) => (
+                    <button key={h} onClick={() => setStartHour12(h)}
+                      className={`py-2.5 rounded-lg text-sm font-bold font-mono transition-all ${
+                        startHour12 === h
+                          ? startAmPm === "AM"
+                            ? "bg-sky-500/30 text-sky-200 border-2 border-sky-400"
+                            : "bg-orange-500/30 text-orange-200 border-2 border-orange-400"
                           : "bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground border border-transparent"
-                      }`}
-                    >
+                      }`}>
                       {h}
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex rounded-lg overflow-hidden border border-border">
+                  {(["AM", "PM"] as const).map((p) => (
+                    <button key={p} onClick={() => setEndAmPm(p)}
+                      className={`flex-1 py-2 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                        endAmPm === p
+                          ? p === "AM" ? "bg-sky-500/20 text-sky-400 border-b-2 border-sky-400"
+                            : "bg-orange-500/20 text-orange-400 border-b-2 border-orange-400"
+                          : "text-muted-foreground hover:bg-muted/30"
+                      }`}>
+                      {p === "AM" ? "🌅 صباحاً" : "🌆 مساءً"}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-6 gap-1.5">
+                  {[12,1,2,3,4,5,6,7,8,9,10,11].map((h) => (
+                    <button key={h} onClick={() => setEndHour12(h)}
+                      className={`py-2.5 rounded-lg text-sm font-bold font-mono transition-all ${
+                        endHour12 === h
+                          ? endAmPm === "AM"
+                            ? "bg-sky-500/30 text-sky-200 border-2 border-sky-400"
+                            : "bg-orange-500/30 text-orange-200 border-2 border-orange-400"
+                          : "bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground border border-transparent"
+                      }`}>
+                      {h}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
-            {/* Preview sentence */}
-            <div className="bg-background border border-border rounded-lg px-3 py-2 text-xs text-muted-foreground">
-              🤖 البوت يعمل من{" "}
-              <span className={`font-bold ${to12(startH24).ampm === "AM" ? "text-sky-400" : "text-orange-400"}`}>
-                {formatHourArFull(startH24)}
-              </span>{" "}
-              ويتوقف{" "}
-              <span className={`font-bold ${stopAmPm === "AM" ? "text-sky-400" : "text-orange-400"}`}>
-                {formatHourArFull(stopH24)}
-              </span>{" "}
-              ({activeHoursNum}ساعة نشاط + {sleepHoursNum} ساعات نوم)
+            {/* Summary bar */}
+            <div className="bg-background border border-border rounded-lg px-3 py-2 text-xs text-muted-foreground flex items-center justify-between">
+              <span>
+                🤖 يعمل من{" "}
+                <span className={`font-bold ${startAmPm === "AM" ? "text-sky-400" : "text-orange-400"}`}>
+                  {formatHourArFull(startH24)}
+                </span>{" "}
+                حتى{" "}
+                <span className={`font-bold ${endAmPm === "AM" ? "text-sky-400" : "text-orange-400"}`}>
+                  {formatHourArFull(endH24)}
+                </span>
+              </span>
+              <span className="text-primary font-bold">{activeHoursNum}ساعة</span>
             </div>
           </div>
 
-          {/* ── Daily Limit + Active Hours + Timing Summary ── */}
+          {/* ── Daily limit + summary ── */}
           <div className="bg-card border border-border rounded-xl p-4 space-y-4">
             <p className="text-xs font-semibold text-foreground border-b border-border pb-2 flex items-center gap-2">
               <Zap className="w-3.5 h-3.5 text-primary" />
-              إعدادات الانضمام والتوقيت
+              إعدادات الانضمام
             </p>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground">الحد اليومي / حساب</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number" min="10" max="200"
-                    value={dailyLimit}
-                    onChange={(e) => setDailyLimit(e.target.value)}
-                    className="h-8 w-20 text-sm font-mono text-center bg-background border-border"
-                    dir="ltr"
-                  />
-                  <span className="text-xs text-muted-foreground">انضمام/يوم</span>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground">ساعات النشاط</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number" min="6" max="23"
-                    value={activeHoursCount}
-                    onChange={(e) => setActiveHoursCount(e.target.value)}
-                    className="h-8 w-20 text-sm font-mono text-center bg-background border-border"
-                    dir="ltr"
-                  />
-                  <span className="text-xs text-muted-foreground">ساعة/يوم</span>
-                </div>
-              </div>
+            <div className="flex items-center gap-3">
+              <Label className="text-xs text-muted-foreground flex-shrink-0">الحد اليومي / حساب</Label>
+              <Input
+                type="number" min="1" max="500"
+                value={dailyLimit}
+                onChange={(e) => setDailyLimit(e.target.value)}
+                className="h-8 w-24 text-sm font-mono text-center bg-background border-border"
+                dir="ltr"
+              />
+              <span className="text-xs text-muted-foreground">انضمام/يوم</span>
             </div>
-
-            {/* Timing formula summary */}
-            <div className="rounded-lg bg-muted/30 border border-border p-3 space-y-2 text-xs font-mono">
-              <p className="text-muted-foreground">📐 معادلة التوقيت الآمن:</p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-background rounded-md p-2 border border-border">
-                  <p className="text-muted-foreground text-[10px]">الفاصل الآمن / حساب</p>
-                  <p className="text-foreground font-bold">~{Math.floor(safeIntervalSecs / 60)} دقيقة</p>
-                  <p className="text-muted-foreground text-[10px]">{safeIntervalSecs} ثانية</p>
-                </div>
-                {[1, 3, 7, 15].map((n) => {
-                  const tick = Math.max(30, Math.floor(safeIntervalSecs / n));
-                  return (
-                    <div key={n} className="bg-background rounded-md p-2 border border-border">
-                      <p className="text-muted-foreground text-[10px]">{n} حسابات نشطة</p>
-                      <p className="text-primary font-bold">تيك كل {tick}ث</p>
-                      <p className="text-muted-foreground text-[10px]">
-                        ~{Math.ceil(activeHoursNum * 3600 / tick * n)} انضمام/يوم
-                      </p>
-                    </div>
-                  );
-                })}
+            <div className="rounded-lg bg-muted/30 border border-border p-3 grid grid-cols-2 gap-2 text-xs font-mono">
+              <div className="bg-background rounded-md p-2 border border-border">
+                <p className="text-muted-foreground text-[10px]">الفاصل الآمن / حساب</p>
+                <p className="text-foreground font-bold">~{Math.floor(safeIntervalSecs / 60)} دقيقة</p>
               </div>
+              {[1, 3, 7, 15].map((n) => {
+                const tick = Math.max(30, Math.floor(safeIntervalSecs / n));
+                return (
+                  <div key={n} className="bg-background rounded-md p-2 border border-border">
+                    <p className="text-muted-foreground text-[10px]">{n} حسابات</p>
+                    <p className="text-primary font-bold">تيك كل {tick}ث</p>
+                    <p className="text-muted-foreground text-[10px]">
+                      ~{Math.ceil(activeHoursNum * 3600 / tick * n)}/يوم
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── تشغيل فوري بمدة مخصصة ── */}
+          <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+            <p className="text-xs font-semibold text-foreground border-b border-border pb-2 flex items-center gap-2">
+              <Zap className="w-3.5 h-3.5 text-yellow-400" />
+              تشغيل فوري خارج الجدول
+            </p>
+            {isForceActive && (
+              <div className="text-xs text-yellow-400 bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2">
+                تشغيل مؤقت نشط حتى {formatHourArFull(forceActiveUntil!.getHours())} — سيعود للجدول تلقائياً
+              </div>
+            )}
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground flex-shrink-0">المدة</span>
+              <Input
+                type="number" min="1" max="24"
+                value={forceHoursInput}
+                onChange={(e) => setForceHoursInput(e.target.value)}
+                className="h-8 w-20 text-sm font-mono text-center bg-background border-border"
+                dir="ltr"
+              />
+              <span className="text-xs text-muted-foreground flex-shrink-0">ساعة</span>
+              <Button
+                size="sm"
+                onClick={() => forceResume.mutate(Math.max(1, Math.min(24, Number(forceHoursInput) || 4)))}
+                disabled={forceResume.isPending}
+                className="gap-1.5 flex-1"
+              >
+                <Play className="w-3.5 h-3.5" />
+                تشغيل {forceHoursInput}ساعة
+              </Button>
             </div>
           </div>
 
@@ -657,7 +625,7 @@ export default function Settings() {
             </p>
             <div className="flex items-end gap-4">
               <div className="space-y-1.5 flex-shrink-0">
-                <Label className="text-xs font-medium text-muted-foreground">تزامن المجموعات كل</Label>
+                <Label className="text-xs font-medium text-muted-foreground">تزامن كل</Label>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number" min="5" max="1440"
@@ -669,11 +637,7 @@ export default function Settings() {
                   <span className="text-xs text-muted-foreground">دقيقة</span>
                 </div>
               </div>
-              <Button
-                onClick={handleSaveSchedule}
-                disabled={updateSettings.isPending}
-                className="flex items-center gap-2 flex-1"
-              >
+              <Button onClick={handleSaveSchedule} disabled={updateSettings.isPending} className="gap-2 flex-1">
                 <Save className="w-3.5 h-3.5" />
                 حفظ الجدول
               </Button>

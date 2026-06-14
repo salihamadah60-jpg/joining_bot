@@ -202,54 +202,110 @@ router.post("/accounts/:id/sync-dialogs", async (req, res): Promise<void> => {
 
   let count = 0;
   try {
-    if (typeof (client as any).getDialogs !== "function") {
-      throw new Error("getDialogs not available on client");
-    }
+    // Use raw MTProto messages.getDialogs — @mtcute client has no high-level getDialogs()
+    // Fetch in batches of 100 until we have all dialogs (Telegram caps each call at 100 for most clients)
+    const syncedCol = await collections.syncedDialogs();
+    const syncedAt = new Date();
+    const allChats: any[] = [];
 
-    // Fetch full dialog list from Telegram directly
-    const dialogs: any[] = await (client as any).getDialogs({ limit: 500 });
+    let offsetDate = 0;
+    let offsetId = 0;
+    let offsetPeer: any = { _: "inputPeerEmpty" };
+    let page = 0;
+    const MAX_PAGES = 20; // safety cap — 20×100 = 2000 chats max
 
-    if (Array.isArray(dialogs) && dialogs.length > 0) {
-      const syncedCol = await collections.syncedDialogs();
-      const syncedAt = new Date();
-
-      // Filter only groups and channels (not private chats with people)
-      const groupDialogs = dialogs.filter((d: any) => {
-        const type: string = d?.chat?.chatType ?? d?.chat?.type ?? "";
-        return type === "group" || type === "supergroup" || type === "channel" ||
-               type === "gigagroup" || type === "broadcast";
+    while (page < MAX_PAGES) {
+      const result: any = await (client as any).call({
+        _: "messages.getDialogs",
+        excludePinned: false,
+        folderId: 0,
+        offsetDate,
+        offsetId,
+        offsetPeer,
+        limit: 100,
+        hash: BigInt(0),
       });
 
-      // Delete old synced data for this account and replace with fresh data
-      await syncedCol.deleteMany({ accountPhone: account.phone });
+      const chats: any[] = result?.chats ?? [];
+      const dialogs: any[] = result?.dialogs ?? [];
 
-      if (groupDialogs.length > 0) {
-        const docs = groupDialogs.map((d: any) => {
-          const chat = d?.chat ?? {};
-          const chatId = String(chat?.id ?? chat?.chatId ?? "");
-          const title: string | null = chat?.title ?? chat?.displayName ?? null;
-          const username: string | null = chat?.username ?? null;
-          const chatType: string | null = chat?.chatType ?? chat?.type ?? null;
-          const url = username ? `https://t.me/${username}` : null;
-          return {
-            _id: new ObjectId(),
-            accountPhone: account.phone,
-            chatId,
-            title,
-            username,
-            url,
-            chatType,
-            syncedAt,
-          };
-        });
-
-        await syncedCol.insertMany(docs, { ordered: false }).catch(() => {});
+      // Build a map of id → chat for quick lookup
+      const chatMap: Record<string, any> = {};
+      for (const c of chats) {
+        const id = String(c?.id ?? "");
+        if (id) chatMap[id] = c;
       }
 
-      count = groupDialogs.length;
+      // Filter only groups and channels from the chats array
+      const groupChats = chats.filter((c: any) => {
+        const t: string = c?._ ?? "";
+        return t === "chat" || t === "channel";
+      });
+
+      allChats.push(...groupChats);
+
+      // Stop if Telegram returned fewer dialogs than we asked for (end of list)
+      if (dialogs.length < 100) break;
+
+      // Prepare pagination offset from the last dialog
+      const lastDialog = dialogs[dialogs.length - 1];
+      const lastMsg = (result?.messages ?? []).find(
+        (m: any) => m?.id === lastDialog?.topMessage
+      );
+      offsetDate = lastMsg?.date ?? offsetDate;
+      offsetId = lastDialog?.topMessage ?? 0;
+
+      const lastPeer = lastDialog?.peer;
+      if (lastPeer?._ === "peerChannel" || lastPeer?._ === "peerChat") {
+        const chatId = lastPeer?.channelId ?? lastPeer?.chatId;
+        const chat = chatMap[String(chatId)];
+        if (chat) {
+          if (chat?._ === "channel") {
+            offsetPeer = {
+              _: "inputPeerChannel",
+              channelId: chatId,
+              accessHash: chat?.accessHash ?? BigInt(0),
+            };
+          } else {
+            offsetPeer = { _: "inputPeerChat", chatId };
+          }
+        }
+      }
+
+      page++;
     }
+
+    // Replace all synced data for this account
+    await syncedCol.deleteMany({ accountPhone: account.phone });
+
+    if (allChats.length > 0) {
+      const docs = allChats.map((c: any) => {
+        const chatId = String(c?.id ?? "");
+        const title: string | null = c?.title ?? null;
+        const username: string | null = c?.username ?? null;
+        const chatType: string = c?._ === "channel"
+          ? (c?.broadcast ? "channel" : "supergroup")
+          : "group";
+        const url = username ? `https://t.me/${username}` : null;
+        return {
+          _id: new ObjectId(),
+          accountPhone: account.phone,
+          chatId,
+          title,
+          username,
+          url,
+          chatType,
+          syncedAt,
+        };
+      });
+
+      await syncedCol.insertMany(docs, { ordered: false }).catch(() => {});
+      count = allChats.length;
+    }
+
+    logger.info({ phone: account.phone, count, pages: page + 1 }, "Dialog sync complete via MTProto");
   } catch (err) {
-    logger.warn({ err, phone: account.phone }, "getDialogs failed — falling back to JOINED collection count");
+    logger.warn({ err, phone: account.phone }, "messages.getDialogs failed — falling back to JOINED count");
     try {
       const joinedCol = await collections.joined();
       count = await joinedCol.countDocuments({ accountPhone: account.phone });

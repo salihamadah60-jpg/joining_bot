@@ -249,40 +249,49 @@ router.get("/auth/pending-code/:phone", async (req, res): Promise<void> => {
       return;
     }
 
-    const peer = await (client as any).resolvePeer("777000");
-    const result = await (client as any).call({
-      _: "messages.getHistory",
-      peer,
-      offsetId: 0,
-      offsetDate: 0,
-      addOffset: 0,
-      limit: 5,
-      maxId: 0,
-      minId: 0,
-      hash: BigInt(0),
-    });
+    // Telegram OTP sender is 777000 in most regions, but some see it as +42777 (id: 42777)
+    // Try both peers to be safe
+    const SENDER_IDS = ["777000", "42777"];
+    for (const senderId of SENDER_IDS) {
+      try {
+        const peer = await (client as any).resolvePeer(senderId);
+        const result = await (client as any).call({
+          _: "messages.getHistory",
+          peer,
+          offsetId: 0,
+          offsetDate: 0,
+          addOffset: 0,
+          limit: 8,
+          maxId: 0,
+          minId: 0,
+          hash: BigInt(0),
+        });
 
-    const messages: any[] = result?.messages ?? [];
-    for (const msg of messages) {
-      const text: string = msg?.message ?? "";
-      const msgDate: number = msg?.date ?? 0; // Unix seconds (Telegram native format)
+        const messages: any[] = result?.messages ?? [];
+        for (const msg of messages) {
+          const text: string = msg?.message ?? "";
+          const msgDate: number = msg?.date ?? 0;
 
-      // Skip codes that arrived before we started watching
-      if (afterTs && msgDate < afterTs) continue;
+          // Skip codes that arrived before we started watching
+          if (afterTs && msgDate < afterTs) continue;
 
-      // Telegram OTP messages come in many formats — try all patterns:
-      // "12345 is your login code"
-      // "Your code: 12345"
-      // "Login code:\n12345"
-      // "<b>12345</b>" (service messages)
-      const code = extractOtpFromText(text);
-      if (code) {
-        res.json({ found: true, code, date: msgDate });
-        return;
+          // Telegram OTP messages come in many formats — try all patterns:
+          // "12345 is your login code"
+          // "Your code: 12345"
+          // "Login code:\n12345"
+          // "<b>12345</b>" (service messages)
+          const code = extractOtpFromText(text);
+          if (code) {
+            res.json({ found: true, code, date: msgDate, sender: senderId });
+            return;
+          }
+        }
+      } catch (_) {
+        // This sender ID doesn't exist or failed — try next
       }
     }
   } catch (_) {
-    // Read failed (connection issue) — fail silently, do NOT create new connection
+    // Outer connection error — fail silently, do NOT create new connection
   }
 
   res.json({ found: false });
