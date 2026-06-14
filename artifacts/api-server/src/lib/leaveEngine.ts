@@ -12,7 +12,7 @@
 import { ObjectId } from "mongodb";
 import { collections } from "@workspace/db";
 import { logger } from "./logger.js";
-import { getClient } from "./clientPool.js";
+import { getClient, getPooledClientOnly, removeClient } from "./clientPool.js";
 import { isRelevantGroupAsync } from "./groupFilter.js";
 import { eventBus } from "./eventBus.js";
 import { getDeviceProfileForPhone } from "./deviceProfiles.js";
@@ -54,6 +54,40 @@ async function leaveSingle(
   }
 }
 
+// ─── Get client with AUTH_KEY_DUPLICATED retry ─────────────────────────────
+
+async function getClientWithRetry(
+  phone: string,
+  sessionString: string,
+  deviceProfile: any
+): Promise<TelegramClient> {
+  // Always prefer the existing pooled client (avoids AUTH_KEY_DUPLICATED entirely)
+  const pooled = getPooledClientOnly(phone);
+  if (pooled) {
+    logger.debug({ phone }, "Leave engine reusing pooled client");
+    return pooled;
+  }
+
+  try {
+    return await getClient(phone, sessionString, deviceProfile);
+  } catch (e: any) {
+    const msg = e?.message ?? String(e);
+    if (msg.includes("AUTH_KEY_DUPLICATED")) {
+      logger.warn(
+        { phone },
+        "AUTH_KEY_DUPLICATED — removing stale client, waiting 35s before retry"
+      );
+      await removeClient(phone);
+      await sleep(35_000);
+      return await getClient(phone, sessionString, deviceProfile);
+    }
+    throw e;
+  }
+}
+
+// Import type for TypeScript
+import type { TelegramClient } from "@mtcute/node";
+
 // ─── Public: batch leave (called from API route) ──────────────────────────────
 
 export async function leaveGroupsBatch(
@@ -76,7 +110,7 @@ export async function leaveGroupsBatch(
       }
     : getDeviceProfileForPhone(phone);
 
-  const client = await getClient(phone, account.sessionString, deviceProfile);
+  const client = await getClientWithRetry(phone, account.sessionString, deviceProfile);
 
   const leftCol = await collections.leftGroups();
   const syncedCol = await collections.syncedDialogs();
@@ -88,6 +122,17 @@ export async function leaveGroupsBatch(
   for (const target of targets) {
     const displayUrl = target.url || target.username || target.chatId || "?";
     const result = await leaveSingle(client, target);
+
+    // If AUTH_KEY_DUPLICATED mid-batch, stop early and surface the error
+    if (!result.ok && result.error?.includes("AUTH_KEY_DUPLICATED")) {
+      logger.warn(
+        { phone, url: displayUrl },
+        "AUTH_KEY_DUPLICATED mid-batch — stopping leave operation"
+      );
+      results.push({ url: displayUrl, title: target.title ?? null, ok: false, error: result.error });
+      failed++;
+      break;
+    }
 
     if (result.ok) {
       success++;

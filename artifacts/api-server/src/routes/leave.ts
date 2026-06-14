@@ -13,6 +13,7 @@ import { ObjectId } from "mongodb";
 import { collections } from "@workspace/db";
 import { leaveGroupsBatch, autoCleanupAccount } from "../lib/leaveEngine.js";
 import type { LeaveTarget } from "../lib/leaveEngine.js";
+import { classifyGroupQuick } from "../lib/groupFilter.js";
 
 const router: IRouter = Router();
 
@@ -34,6 +35,7 @@ router.get("/accounts/:phone/dialogs", async (req, res): Promise<void> => {
         url: d.url ?? null,
         chatType: d.chatType ?? null,
         syncedAt: d.syncedAt ? new Date(d.syncedAt).toISOString() : null,
+        classification: classifyGroupQuick(d.title, null),
       }))
     );
   } catch (e: any) {

@@ -4,13 +4,16 @@
  * The bot is designed to join ONLY medical, research, and educational groups.
  * Filter is applied to the group title (and description if available).
  *
+ * TWO-TIER KEYWORD SYSTEM:
+ *   Tier 1 — STRONG_MEDICAL: specific medical terms → sufficient alone to mark RELEVANT
+ *   Tier 2 — ACADEMIC_ONLY:  generic academic terms (university, college, research, etc.)
+ *                             → NOT sufficient alone (too many false positives like
+ *                               "كلية الهندسة", "بحث تسويق", "جامعة شقراء")
+ *
  * Return values from isRelevantGroupAsync:
  *   true  → clearly relevant (join, keep)
- *   false → clearly NOT relevant (mark not_in_scope)
+ *   false → clearly NOT relevant (mark not_in_scope / auto-leave)
  *   null  → uncertain (no title + no AI + no messages → pending_review)
- *
- * Learning: checks learnedPatterns collection for user-confirmed decisions
- * before running AI/keyword classification.
  */
 
 import { logger } from "./logger.js";
@@ -33,7 +36,6 @@ export async function observeGroupAfterJoin(
 
   const sampleMessages: string[] = [];
   try {
-    // Try different @mtcute history methods
     let history: any[] | null = null;
 
     if (typeof (client as any).getMessages === "function") {
@@ -124,12 +126,8 @@ export async function isRelevantGroupAsync(
     const aiResult = await aiClassifyGroup(title, sampleMessages);
     if (aiResult !== null) return aiResult;
     // AI returned null (unavailable/error) — fall through to keywords
-    // but if keywords don't match clearly, return null (uncertain)
     const kwResult = isRelevantGroup(title, description);
-    if (!kwResult) {
-      // AI unavailable + keywords say "no" → uncertain, needs human review
-      return null;
-    }
+    if (!kwResult) return null;
     return kwResult;
   }
 
@@ -139,10 +137,7 @@ export async function isRelevantGroupAsync(
 
 /**
  * HARD-BLOCKED keywords — groups matching ANY of these are ALWAYS rejected,
- * regardless of AI or learned patterns. These are unambiguously non-medical.
- *
- * Covers investment, trading, crypto, IPO, advertising platforms, and
- * any group with "منصة" (platform — typically advertising/investment bots).
+ * regardless of AI or learned patterns.
  */
 const HARD_BLOCKED_KEYWORDS = [
   // Arabic: Investment / Finance
@@ -158,7 +153,6 @@ const HARD_BLOCKED_KEYWORDS = [
   "كابيتال",
   "توصيات تداول", "توصيات الاسهم", "توصيات الفوركس",
   "ربح سريع", "ارباح سريعة", "تربح من",
-  // Arabic: Advertising platforms (المنصة used as a group identity = ads)
   "منصة",
   // English: Crypto / Investment
   "crypto", "cryptocurrency",
@@ -172,10 +166,6 @@ const HARD_BLOCKED_KEYWORDS = [
 
 const NORMALIZED_BLOCKED = HARD_BLOCKED_KEYWORDS.map((k) => k.toLowerCase());
 
-/**
- * Returns true if the group title/description matches a hard-blocked keyword.
- * These groups must NEVER be joined — they are investment/crypto/ad platforms.
- */
 export function isHardBlocked(
   title: string | null | undefined,
   description?: string | null,
@@ -187,125 +177,187 @@ export function isHardBlocked(
   return NORMALIZED_BLOCKED.some((kw) => combined.includes(kw));
 }
 
-const RELEVANT_KEYWORDS = [
-  // ===== Arabic: Medical specialties & procedures =====
-  "طب", "طبيب", "أطباء", "اطباء", "طبية",
-  "صيدل", "صيدلي", "صيدلان", "صيدلانيات",
-  "مستشف", "مستشفى", "عيادة", "عيادات",
-  "صحة", "صحي", "صحية",
+// ─── TIER 1: Strong medical keywords — sufficient alone ───────────────────────
+// These are SPECIFIC to medicine/healthcare. A group with ANY of these is relevant.
+
+const STRONG_MEDICAL_KEYWORDS = [
+  // ── Arabic: Medical specialties & professions ──
+  "طب", "طبيب", "طبية", "أطباء", "اطباء",
+  "طب بشري", "طب بيطري", "طب أسنان", "طب اسنان",
+  "كلية الطب",             // medical school (explicit)
+  "قسم الطب",
+  "صيدل", "صيدلي", "صيدلانيات",
   "تمريض", "ممرض", "ممرضة",
   "جراح", "جراحة",
-  "أشعة", "اشعة", "مختبر", "مختبرات",
-  "تحليل", "تحاليل",
-  "دواء", "أدوية", "ادوية", "علاج", "علاجات",
-  "مريض", "مرضى",
-  "أسنان", "اسنان", "تقويم",
-  "بصريات", "نظارات",
-  "فيزيوثيرابي", "تأهيل", "تاهيل",
-  "نفسي", "نفسية",
-  "قلب", "قلبية",
+  "أسنان", "اسنان", "أسنانية",
+  "بصريات",
+  "فيزيوثيرابي", "علاج طبيعي",
+  "نفسية", "نفسي",          // psychiatry/psychology
+  "قلبية", "أمراض قلب",
   "أعصاب", "اعصاب", "عصبية",
   "باطنة", "باطنية",
   "جلدية",
-  "عظام", "عظمية",
-  "أطفال", "اطفال",
-  "نساء وتوليد", "توليد",
-  "ميكروب", "بكتيريا", "فيروس", "مناعة",
-  "أشعة سينية", "مقطعية", "رنين مغناطيسي",
-  "تشريح", "فسيولوجيا", "كيمياء حيوية",
-  "باثولوجيا", "هيستولوجيا",
-  "طوارئ", "إسعاف", "اسعاف",
-  "كلى", "كليه", "غسيل كلى",
-  "سكري", "ضغط الدم", "أورام", "اورام", "سرطان",
-  // ===== Arabic: Medical technicians (فني — common Saudi healthcare roles) =====
-  "تجبير",           // orthopedic casting technician
-  "تعقيم",           // CSSD / sterilization technician
-  "ترميز",           // medical coding technician
-  "ترميز طبي",       // medical coding
-  "رعاية مرضى",     // patient care technician (PCT)
-  "فني طبي",         // generic medical technician
-  "مساعد طبيب",      // physician assistant
-  "فني مختبر",       // lab technician
-  "فني أشعة",        // radiology technician
-  "التشغيل العلاجي", // therapeutic operations
-  "التخدير",         // anesthesia
-  "تخدير",           // anesthesia
-  "عناية مركزة",     // ICU
-  "رعاية حرجة",      // critical care
-  // ===== Arabic: Saudi healthcare certifications & exams =====
-  "ستيب",            // STEP (Saudi health specialties exam)
-  "هيئة التخصصات",  // Saudi Commission for Health Specialties
-  "الهيئة السعودية للتخصصات", // full name
-  "برامج الهيئة",   // health commission programs
-  "تخصصات صحية",    // health specialties
-  "برامج صحية",     // health programs
-  "مقابلات برامج",  // program interviews (medical)
-  "مقابلات فني",    // technician interviews (medical)
-  "مقابلات طبية",   // medical interviews
-  "تسريبات",        // exam leaks (common in medical student groups)
-  // ===== Arabic: Research/Academic =====
-  "بحث", "بحثي", "بحثية", "أبحاث", "ابحاث",
-  "علمي", "علمية",
-  "دراسة", "دراسات",
-  "جامعة", "جامعات",
-  "كلية", "كليات",
-  "أكاديم", "اكاديم", "أكاديمي", "اكاديمي",
-  "تعليم", "تعليمي", "تعليمية",
-  "طلاب", "طالب", "طالبات",
-  "تخرج", "خريج",
-  "دكتوراه", "ماجستير", "بكالوريوس",
-  "مقرر", "محاضرة", "محاضرات",
-  "مناهج", "امتحان", "اختبار",
-  "ملزمة", "مذكرة", "ملاحظات طبية",
-  "الكلية", "القسم الطبي",
-  "طب بشري", "طب بيطري",
-  // ===== English: Medical =====
-  "medical", "medicine", "doctor", "doctors", "physician",
-  "health", "healthcare", "pharmacy", "pharmacist",
-  "nursing", "nurse", "surgery", "surgical",
-  "hospital", "clinic", "radiology", "laboratory",
+  "عظام", "عظمية", "تجبير",
+  "نساء وتوليد", "توليد", "ولادة",
+  "أطفال وحديثي", "حديثي الولادة",
+  "مختبر", "مختبرات", "مختبر طبي",
+  "أشعة", "اشعة",
+  "أورام", "اورام", "سرطان", "أورام",
+  "طوارئ طبية", "إسعاف", "اسعاف",
+  "كلى", "غسيل كلى",
+  "سكري", "ضغط الدم", "ضغط دم",
+  "تشريح", "فسيولوجيا", "كيمياء حيوية", "باثولوجيا", "هيستولوجيا",
+  "ميكروبيولوجيا", "مناعة",
+  "مقطعية", "رنين مغناطيسي", "أشعة سينية",
+  "تخدير",
+  "عناية مركزة", "رعاية حرجة",
+  "دواء", "أدوية", "ادوية", "علاج",
+  "مريض", "مرضى",
+  "عيادة", "مستشفى", "مستشفيات",
+  // ── Arabic: Medical technicians (فني roles common in Saudi healthcare) ──
+  "رعاية مرضى",             // patient care technician (PCT)
+  "تعقيم",                  // CSSD / sterilization technician
+  "ترميز طبي", "ترميز",     // medical coding
+  "فني طبي",
+  "مساعد طبيب",
+  "فني مختبر",
+  "فني أشعة",
+  "التشغيل العلاجي",
+  // ── Arabic: Saudi healthcare exams & certifications ──
+  "ستيب", "STEP",
+  "هيئة التخصصات",
+  "الهيئة السعودية للتخصصات",
+  "برامج الهيئة",
+  "تخصصات صحية", "التخصصات الصحية",
+  "برامج صحية",
+  "مقابلات فني",             // technician program interviews
+  "مقابلات طبية",
+  "الكليات الصحية",
+  "بروماتريك",              // Prometric
+  "اختبار هيئة",            // commission exam
+  "اختبار ترخيص",           // license exam
+  "صحة مهنية",
+  "السبورة العربية",         // Arabic Board
+  // ── Arabic: Medical jobs ──
+  "وظائف طبية", "وظائف صحية", "وظائف تمريض", "وظائف صيدل",
+  "وظائف أشعة", "وظائف مختبر",
+  "توظيف طبي",
+  // ── English: Medical specialties ──
+  "medical", "medicine", "doctor", "physician",
+  "pharmacy", "pharmacist",
+  "nursing", "nurse",
+  "surgery", "surgical",
+  "hospital", "clinic",
+  "radiology", "laboratory",
   "treatment", "therapy", "diagnosis", "patient",
-  "dental", "dentist", "optometry",
+  "dental", "dentist", "orthodontic",
+  "optometry", "ophthalmology",
   "cardiology", "neurology", "dermatology", "oncology",
-  "pediatric", "gynecology", "psychiatry", "orthopedic",
+  "pediatric", "gynecology", "obstetric",
+  "psychiatry", "orthopedic",
   "anatomy", "physiology", "biochemistry", "pathology",
+  "microbiology", "immunology",
   "emergency", "ambulance", "icu",
   "diabetes", "cancer", "tumor",
-  // ===== English: Saudi healthcare acronyms =====
+  "anesthesia",
+  // ── English: Saudi healthcare acronyms ──
   "pct",     // patient care technician
   "cssd",    // central sterile supply department
   "scfhs",   // saudi commission for health specialties
-  "ecg",     // electrocardiogram
-  "eeg",     // electroencephalogram
-  "step",    // saudi test for health specialties
+  "ecg", "eeg",
+  "smle",    // saudi medical licensing exam
+  "dha",     // dubai health authority exam
+  "prometric",
+  "mrcog",   // membership of royal college of obstetricians
+  "sple",    // saudi pharmacy license exam
   "osce",    // objective structured clinical examination
-  "cbc",     // complete blood count (lab test)
-  // ===== English: Research/Academic =====
-  "research", "science", "scientific", "study",
-  "university", "college", "academic", "education",
-  "student", "graduate", "phd", "master",
-  "lecture", "curriculum", "thesis", "dissertation",
-  "med student", "medstudent",
-  // ===== Student/Scholarship keywords =====
-  "students", "scholarship", "scholarships", "admission", "admissions",
-  "طلاب الخارج", "ابتعاث", "منح", "دراسة الخارج",
+  "nbme",    // national board of medical examiners
+  "mrcs",    // membership of royal college of surgeons
+  "frcr",    // fellow of royal college of radiologists
+  "cbc",     // complete blood count
+  // ── Pharmacy / clinical ──
+  "pharmacology", "pharmaceutical",
+  // ── Health specialties keywords (common in Saudi group naming) ──
+  "health specialties", "health sciences",
 ];
 
-const NORMALIZED_KEYWORDS = RELEVANT_KEYWORDS.map((k) => k.toLowerCase());
+const NORMALIZED_STRONG = STRONG_MEDICAL_KEYWORDS.map((k) => k.toLowerCase());
+
+// ─── TIER 2: Academic-only keywords — NOT sufficient alone ─────────────────────
+// These appear in many non-medical groups. Used only to CONFIRM non-relevance
+// when NO strong medical keyword is present.
+
+const ACADEMIC_ONLY_KEYWORDS = [
+  "جامعة", "جامعات",
+  "كلية",                // college (of engineering, law, etc.)
+  "طلاب", "طالب", "طالبات",
+  "دراسة", "دراسات",
+  "تعليم", "تعليمي", "تعليمية",
+  "أكاديم", "اكاديم",
+  "بحث", "بحثية", "أبحاث", "ابحاث",
+  "علمي", "علمية",
+  "تخرج", "خريج", "خريجين",
+  "دكتوراه", "ماجستير", "بكالوريوس",
+  "مقرر", "محاضرة", "محاضرات",
+  "مناهج", "امتحان", "اختبار",
+  "ملزمة", "مذكرة",
+  "ابتعاث", "منح دراسية", "منح",
+  "طلاب الخارج", "دراسة الخارج",
+  "university", "college", "academic", "academics",
+  "research", "science", "scientific",
+  "study", "studies",
+  "student", "students", "graduate",
+  "phd", "master", "bachelor",
+  "lecture", "curriculum", "thesis", "dissertation",
+  "scholarship", "scholarships", "admission",
+];
+
+const NORMALIZED_ACADEMIC = ACADEMIC_ONLY_KEYWORDS.map((k) => k.toLowerCase());
 
 /**
- * Returns true if the group title/description is relevant.
- * Returns false when title/description exist but no keywords match,
- * OR if the title matches a hard-blocked investment/ads term.
+ * Two-tier keyword relevance check (synchronous).
+ *
+ * Returns true  → strong medical keyword match
+ * Returns false → no strong medical keyword (either academic-only or nothing)
+ * (Never returns null — that's for the async wrapper when truly uncertain)
  */
 export function isRelevantGroup(
   title: string | null | undefined,
   description?: string | null
 ): boolean {
   if (isHardBlocked(title, description)) return false;
-  if (!title && !description) return true;
+  if (!title && !description) return true; // no info → let async handler decide
+
   const combined = ((title ?? "") + " " + (description ?? "")).toLowerCase();
-  return NORMALIZED_KEYWORDS.some((kw) => combined.includes(kw));
+
+  // Tier 1: specific medical keyword → RELEVANT
+  if (NORMALIZED_STRONG.some((kw) => combined.includes(kw))) return true;
+
+  // Tier 2: only generic academic keywords (university, research, study…)
+  // without any medical signal → NOT RELEVANT
+  // (e.g. "كلية الهندسة", "جامعة شقراء", "Applied Statistics", "SHAGHAF RESEARCH")
+  return false;
+}
+
+/**
+ * Quick synchronous medical check — used for UI pre-classification.
+ * Returns: "medical" | "non_medical" | "uncertain"
+ */
+export function classifyGroupQuick(
+  title: string | null | undefined,
+  description?: string | null
+): "medical" | "non_medical" | "uncertain" {
+  if (!title && !description) return "uncertain";
+  if (isHardBlocked(title, description)) return "non_medical";
+
+  const combined = ((title ?? "") + " " + (description ?? "")).toLowerCase();
+  if (NORMALIZED_STRONG.some((kw) => combined.includes(kw))) return "medical";
+
+  // Has some academic keywords but no medical → not medical
+  if (NORMALIZED_ACADEMIC.some((kw) => combined.includes(kw))) return "non_medical";
+
+  // No recognizable keywords at all → uncertain
+  return "uncertain";
 }
 
 /**

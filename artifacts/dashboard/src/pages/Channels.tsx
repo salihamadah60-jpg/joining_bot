@@ -8,7 +8,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
-import { Radio, Download, LogOut, History, RefreshCw, RotateCcw, Loader2, AlertTriangle, CheckCircle2, Search, Zap } from "lucide-react";
+import {
+  Radio, Download, LogOut, History, RefreshCw, RotateCcw,
+  Loader2, AlertTriangle, CheckCircle2, Search, Zap, Stethoscope,
+  XCircle, HelpCircle, ChevronDown, ChevronUp,
+} from "lucide-react";
 import { format } from "date-fns";
 import { useListAccounts } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
@@ -30,6 +34,7 @@ interface Dialog {
   url: string | null;
   chatType: string | null;
   syncedAt: string | null;
+  classification: "medical" | "non_medical" | "uncertain";
 }
 
 interface LeftGroup {
@@ -40,6 +45,13 @@ interface LeftGroup {
   chatType: string | null;
   reason: string;
   leftAt: string;
+}
+
+interface LeaveResultItem {
+  url: string;
+  title: string | null;
+  ok: boolean;
+  error?: string;
 }
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
@@ -58,7 +70,11 @@ async function fetchLeaveHistory(accountPhone?: string): Promise<{ total: number
   return r.json();
 }
 
-async function batchLeave(accountPhone: string, groups: Dialog[], reason: string) {
+async function batchLeave(
+  accountPhone: string,
+  groups: Dialog[],
+  reason: string
+): Promise<{ success: number; failed: number; results: LeaveResultItem[] }> {
   const r = await fetch("/api/leave/batch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -94,6 +110,99 @@ async function rejoinUrls(urls: string[]) {
   return r.json();
 }
 
+// ─── Classification badge ─────────────────────────────────────────────────────
+
+function ClassificationBadge({ cls }: { cls: Dialog["classification"] }) {
+  if (cls === "medical") {
+    return (
+      <Badge className="text-[10px] py-0 gap-1 bg-emerald-500/15 text-emerald-400 border-emerald-500/30 border">
+        <Stethoscope className="w-2.5 h-2.5" />
+        طبي
+      </Badge>
+    );
+  }
+  if (cls === "non_medical") {
+    return (
+      <Badge className="text-[10px] py-0 gap-1 bg-red-500/15 text-red-400 border-red-500/30 border">
+        <XCircle className="w-2.5 h-2.5" />
+        غير طبي
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="text-[10px] py-0 gap-1 bg-yellow-500/10 text-yellow-500/80 border-yellow-500/20 border">
+      <HelpCircle className="w-2.5 h-2.5" />
+      غير محدد
+    </Badge>
+  );
+}
+
+// ─── Leave results panel ──────────────────────────────────────────────────────
+
+function LeaveResultsPanel({
+  results,
+  onDismiss,
+}: {
+  results: { success: number; failed: number; results: LeaveResultItem[] };
+  onDismiss: () => void;
+}) {
+  const [showDetails, setShowDetails] = useState(false);
+  const failedItems = results.results.filter((r) => !r.ok);
+
+  return (
+    <Card className="border-card-border bg-card/60">
+      <CardContent className="p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3 font-mono text-sm">
+            <span className="text-emerald-400 flex items-center gap-1">
+              <CheckCircle2 className="w-4 h-4" />
+              نجح: {results.success}
+            </span>
+            <span className={results.failed > 0 ? "text-red-400 flex items-center gap-1" : "text-muted-foreground"}>
+              <XCircle className="w-4 h-4" />
+              فشل: {results.failed}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {failedItems.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs font-mono h-6 px-2"
+                onClick={() => setShowDetails(!showDetails)}
+              >
+                {showDetails ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
+                تفاصيل الأخطاء
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" className="text-xs font-mono h-6 px-2" onClick={onDismiss}>
+              إغلاق ✕
+            </Button>
+          </div>
+        </div>
+
+        {showDetails && failedItems.length > 0 && (
+          <div className="space-y-1 border-t border-card-border pt-2 max-h-40 overflow-y-auto">
+            {failedItems.map((item, i) => (
+              <div key={i} className="text-xs font-mono flex items-start gap-2 text-red-400/80">
+                <XCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                <span className="text-primary/70 truncate flex-1">{item.title || item.url}</span>
+                <span className="text-red-400/60 truncate max-w-[200px]" title={item.error}>
+                  {item.error?.includes("AUTH_KEY_DUPLICATED")
+                    ? "جلسة مكررة — أعد المحاولة"
+                    : item.error?.includes("No username")
+                    ? "لا رابط متاح (مجموعة خاصة)"
+                    : item.error?.slice(0, 60)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Leave Manager Tab ────────────────────────────────────────────────────────
 
 function LeaveManagerTab() {
@@ -102,7 +211,9 @@ function LeaveManagerTab() {
   const [selectedPhone, setSelectedPhone] = useState<string>("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [searchQ, setSearchQ] = useState("");
-  const [filterMode, setFilterMode] = useState<"all" | "has_url" | "no_url">("all");
+  const [filterMode, setFilterMode] = useState<"all" | "non_medical" | "medical" | "uncertain" | "has_url" | "no_url">("all");
+  const [sortBy, setSortBy] = useState<"classification" | "title" | "synced">("classification");
+  const [leaveResults, setLeaveResults] = useState<{ success: number; failed: number; results: LeaveResultItem[] } | null>(null);
 
   const { data: accountsData } = useListAccounts();
   const accounts = (accountsData as any) ?? [];
@@ -121,16 +232,25 @@ function LeaveManagerTab() {
     mutationFn: ({ groups, reason }: { groups: Dialog[]; reason: string }) =>
       batchLeave(selectedPhone, groups, reason),
     onSuccess: (data) => {
-      toast({
-        title: `تمت المغادرة`,
-        description: `نجح: ${data.success} | فشل: ${data.failed}`,
-      });
+      setLeaveResults(data);
+      if (data.success > 0) {
+        toast({
+          title: `تمت المغادرة`,
+          description: `نجح: ${data.success} | فشل: ${data.failed}`,
+        });
+      } else {
+        toast({
+          title: "لم تنجح أي مغادرة",
+          description: `فشل: ${data.failed} — انظر تفاصيل الأخطاء أدناه`,
+          variant: "destructive",
+        });
+      }
       setSelected(new Set());
       refetchDialogs();
       qc.invalidateQueries({ queryKey: ["/api/leave/history"] });
       qc.invalidateQueries({ queryKey: ["/api/accounts"] });
     },
-    onError: (e: any) => toast({ title: "خطأ", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "خطأ في الاتصال", description: e.message, variant: "destructive" }),
   });
 
   const autoCleanupMutation = useMutation({
@@ -138,7 +258,7 @@ function LeaveManagerTab() {
     onSuccess: (data) => {
       toast({
         title: "اكتمل التنظيف التلقائي",
-        description: `فُحص: ${data.checked} | غادر: ${data.left} | إعادة تفعيل: ${data.reactivated ? "نعم" : "لا"}`,
+        description: `فُحص: ${data.checked} | غادر: ${data.left} | إعادة تفعيل: ${data.reactivated ? "نعم ✅" : "لا"}`,
       });
       refetchDialogs();
       qc.invalidateQueries({ queryKey: ["/api/accounts"] });
@@ -147,25 +267,66 @@ function LeaveManagerTab() {
     onError: (e: any) => toast({ title: "خطأ", description: e.message, variant: "destructive" }),
   });
 
+  // Classification counts
+  const counts = useMemo(() => {
+    const medical = dialogs.filter((d) => d.classification === "medical").length;
+    const non_medical = dialogs.filter((d) => d.classification === "non_medical").length;
+    const uncertain = dialogs.filter((d) => d.classification === "uncertain").length;
+    return { medical, non_medical, uncertain, total: dialogs.length };
+  }, [dialogs]);
+
+  // Filter + sort
   const filtered = useMemo(() => {
-    let list = dialogs;
-    if (filterMode === "has_url") list = list.filter((d) => d.url || d.username);
-    if (filterMode === "no_url") list = list.filter((d) => !d.url && !d.username);
+    let list = [...dialogs];
+
+    // Filter by mode
+    if (filterMode === "non_medical") list = list.filter((d) => d.classification === "non_medical");
+    else if (filterMode === "medical") list = list.filter((d) => d.classification === "medical");
+    else if (filterMode === "uncertain") list = list.filter((d) => d.classification === "uncertain");
+    else if (filterMode === "has_url") list = list.filter((d) => d.url || d.username);
+    else if (filterMode === "no_url") list = list.filter((d) => !d.url && !d.username);
+
+    // Search
     if (searchQ.trim()) {
       const q = searchQ.toLowerCase();
-      list = list.filter((d) => (d.title ?? "").toLowerCase().includes(q) || (d.url ?? "").toLowerCase().includes(q));
+      list = list.filter(
+        (d) =>
+          (d.title ?? "").toLowerCase().includes(q) ||
+          (d.url ?? "").toLowerCase().includes(q)
+      );
     }
+
+    // Sort
+    if (sortBy === "classification") {
+      const order = { non_medical: 0, uncertain: 1, medical: 2 };
+      list.sort((a, b) => order[a.classification] - order[b.classification]);
+    } else if (sortBy === "title") {
+      list.sort((a, b) => (a.title ?? "").localeCompare(b.title ?? "", "ar"));
+    }
+
     return list;
-  }, [dialogs, filterMode, searchQ]);
+  }, [dialogs, filterMode, searchQ, sortBy]);
 
   const selectedDialogs = filtered.filter((d) => selected.has(d.chatId));
 
   const toggleAll = () => {
-    if (selected.size === filtered.length) {
+    if (selected.size === filtered.length && filtered.length > 0) {
       setSelected(new Set());
     } else {
       setSelected(new Set(filtered.map((d) => d.chatId)));
     }
+  };
+
+  // Auto-select all non-medical dialogs
+  const autoSelectNonMedical = () => {
+    const nonMedical = dialogs.filter((d) => d.classification === "non_medical");
+    setSelected(new Set(nonMedical.map((d) => d.chatId)));
+    setFilterMode("all");
+    setSortBy("classification");
+    toast({
+      title: `تم تحديد ${nonMedical.length} مجموعة غير طبية`,
+      description: "راجع القائمة وأزل أي مجموعة تريد الاحتفاظ بها قبل المغادرة",
+    });
   };
 
   const selectedAccount = accounts.find((a: any) => a.phone === selectedPhone);
@@ -175,7 +336,14 @@ function LeaveManagerTab() {
     <div className="space-y-4">
       {/* Account selector + actions */}
       <div className="flex flex-wrap items-center gap-3">
-        <Select value={selectedPhone} onValueChange={(v) => { setSelectedPhone(v); setSelected(new Set()); }}>
+        <Select
+          value={selectedPhone}
+          onValueChange={(v) => {
+            setSelectedPhone(v);
+            setSelected(new Set());
+            setLeaveResults(null);
+          }}
+        >
           <SelectTrigger className="w-64 font-mono text-sm border-card-border bg-card/40">
             <SelectValue placeholder="اختر حساباً..." />
           </SelectTrigger>
@@ -183,9 +351,13 @@ function LeaveManagerTab() {
             {accounts.map((acc: any) => (
               <SelectItem key={acc.phone} value={acc.phone}>
                 <span className="font-mono text-xs">{acc.phone}</span>
-                {acc.label && <span className="mr-2 text-muted-foreground text-xs">({acc.label})</span>}
+                {acc.label && (
+                  <span className="mr-2 text-muted-foreground text-xs">({acc.label})</span>
+                )}
                 {acc.status === "channels_limit" && (
-                  <Badge variant="destructive" className="mr-2 text-[10px] py-0">ممتلئ</Badge>
+                  <Badge variant="destructive" className="mr-2 text-[10px] py-0">
+                    ممتلئ
+                  </Badge>
                 )}
               </SelectItem>
             ))}
@@ -204,6 +376,18 @@ function LeaveManagerTab() {
               تحديث
             </Button>
 
+            {counts.non_medical > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={autoSelectNonMedical}
+                className="font-mono gap-2 border-red-500/40 text-red-400 hover:bg-red-500/10"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                تحديد غير الطبية ({counts.non_medical})
+              </Button>
+            )}
+
             {isChannelsLimit && (
               <Button
                 variant="outline"
@@ -217,7 +401,7 @@ function LeaveManagerTab() {
                 ) : (
                   <Zap className="w-3.5 h-3.5" />
                 )}
-                تنظيف تلقائي (إزالة غير الطبية)
+                تنظيف تلقائي
               </Button>
             )}
           </>
@@ -227,7 +411,9 @@ function LeaveManagerTab() {
           <Button
             variant="destructive"
             size="sm"
-            onClick={() => leaveMutation.mutate({ groups: selectedDialogs, reason: "manual" })}
+            onClick={() =>
+              leaveMutation.mutate({ groups: selectedDialogs, reason: "manual" })
+            }
             disabled={leaveMutation.isPending}
             className="font-mono gap-2 mr-auto"
           >
@@ -241,22 +427,69 @@ function LeaveManagerTab() {
         )}
       </div>
 
+      {/* Leave results panel */}
+      {leaveResults && (
+        <LeaveResultsPanel results={leaveResults} onDismiss={() => setLeaveResults(null)} />
+      )}
+
       {/* Info banner for channels_limit */}
       {isChannelsLimit && (
         <Card className="border-orange-500/30 bg-orange-500/5">
           <CardContent className="p-3 text-xs font-mono text-orange-300 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
             <span>
-              الحساب وصل لحد القنوات (500). استخدم "تنظيف تلقائي" لإزالة المجموعات غير الطبية وإعادة تفعيله،
-              أو حدد مجموعات يدوياً وغادرها.
+              الحساب وصل لحد القنوات (500). استخدم "تحديد غير الطبية" ثم "مغادرة المحددة"،
+              أو "تنظيف تلقائي" لإزالة كل غير الطبية تلقائياً وإعادة تفعيل الحساب.
             </span>
           </CardContent>
         </Card>
       )}
 
+      {/* Classification summary */}
+      {selectedPhone && !dialogsLoading && dialogs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setFilterMode("all")}
+            className={`text-xs font-mono px-2 py-1 rounded border transition-colors ${filterMode === "all" ? "border-primary/50 bg-primary/10 text-primary" : "border-card-border text-muted-foreground hover:border-primary/30"}`}
+          >
+            الكل: {counts.total}
+          </button>
+          <button
+            onClick={() => setFilterMode("non_medical")}
+            className={`text-xs font-mono px-2 py-1 rounded border transition-colors ${filterMode === "non_medical" ? "border-red-500/50 bg-red-500/10 text-red-400" : "border-card-border text-muted-foreground hover:border-red-500/30"}`}
+          >
+            🔴 غير طبي: {counts.non_medical}
+          </button>
+          <button
+            onClick={() => setFilterMode("medical")}
+            className={`text-xs font-mono px-2 py-1 rounded border transition-colors ${filterMode === "medical" ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400" : "border-card-border text-muted-foreground hover:border-emerald-500/30"}`}
+          >
+            🟢 طبي: {counts.medical}
+          </button>
+          <button
+            onClick={() => setFilterMode("uncertain")}
+            className={`text-xs font-mono px-2 py-1 rounded border transition-colors ${filterMode === "uncertain" ? "border-yellow-500/50 bg-yellow-500/10 text-yellow-400" : "border-card-border text-muted-foreground hover:border-yellow-500/30"}`}
+          >
+            🟡 غير محدد: {counts.uncertain}
+          </button>
+          <div className="mr-auto flex items-center gap-2">
+            <span className="text-xs text-muted-foreground font-mono">ترتيب:</span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="text-xs font-mono bg-card border border-card-border rounded px-2 py-1 text-muted-foreground"
+            >
+              <option value="classification">غير طبي أولاً</option>
+              <option value="title">الاسم</option>
+              <option value="synced">تاريخ المزامنة</option>
+            </select>
+          </div>
+        </div>
+      )}
+
       {selectedPhone && (
         <>
-          {/* Filters */}
+          {/* Search */}
           <div className="flex items-center gap-3">
             <div className="relative flex-1 max-w-xs">
               <Search className="absolute right-3 top-2.5 w-3.5 h-3.5 text-muted-foreground" />
@@ -267,18 +500,10 @@ function LeaveManagerTab() {
                 className="pr-9 font-mono text-sm h-8 border-card-border bg-card/40"
               />
             </div>
-            <Select value={filterMode} onValueChange={(v: any) => setFilterMode(v)}>
-              <SelectTrigger className="w-36 font-mono text-xs h-8 border-card-border bg-card/40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">الكل ({dialogs.length})</SelectItem>
-                <SelectItem value="has_url">لديها رابط</SelectItem>
-                <SelectItem value="no_url">بدون رابط</SelectItem>
-              </SelectContent>
-            </Select>
             <span className="text-xs font-mono text-muted-foreground">
-              {selected.size > 0 ? `${selected.size} محدد` : `${filtered.length} مجموعة`}
+              {selected.size > 0
+                ? `${selected.size} محدد من ${filtered.length}`
+                : `${filtered.length} مجموعة`}
             </span>
           </div>
 
@@ -296,6 +521,7 @@ function LeaveManagerTab() {
                       />
                     </TableHead>
                     <TableHead className="font-mono text-xs">TITLE</TableHead>
+                    <TableHead className="font-mono text-xs w-20">CLASS</TableHead>
                     <TableHead className="font-mono text-xs">URL</TableHead>
                     <TableHead className="font-mono text-xs">TYPE</TableHead>
                     <TableHead className="font-mono text-xs text-right">SYNCED</TableHead>
@@ -304,29 +530,32 @@ function LeaveManagerTab() {
                 <TableBody className="font-mono text-sm">
                   {dialogsLoading && (
                     <TableRow>
-                      <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
                         <Loader2 className="w-5 h-5 animate-spin mx-auto" />
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {!dialogsLoading && !selectedPhone && (
-                    <TableRow>
-                      <TableCell colSpan={5} className="h-24 text-center text-muted-foreground text-xs">
-                        اختر حساباً لعرض مجموعاته
                       </TableCell>
                     </TableRow>
                   )}
                   {!dialogsLoading && filtered.length === 0 && selectedPhone && (
                     <TableRow>
-                      <TableCell colSpan={5} className="h-24 text-center text-muted-foreground text-xs">
-                        لا توجد مجموعات — قد تحتاج مزامنة الحوارات أولاً
+                      <TableCell colSpan={6} className="h-24 text-center text-muted-foreground text-xs">
+                        {dialogs.length === 0
+                          ? "لا توجد مجموعات — قد تحتاج مزامنة الحوارات أولاً"
+                          : "لا توجد نتائج بهذا الفلتر"}
                       </TableCell>
                     </TableRow>
                   )}
                   {filtered.map((d) => (
                     <TableRow
                       key={d.chatId}
-                      className={`border-card-border cursor-pointer ${selected.has(d.chatId) ? "bg-destructive/10" : "hover:bg-muted/30"}`}
+                      className={`border-card-border cursor-pointer transition-colors ${
+                        selected.has(d.chatId)
+                          ? "bg-destructive/10 hover:bg-destructive/15"
+                          : d.classification === "non_medical"
+                          ? "hover:bg-red-500/5"
+                          : d.classification === "medical"
+                          ? "hover:bg-emerald-500/5"
+                          : "hover:bg-muted/30"
+                      }`}
                       onClick={() => {
                         const next = new Set(selected);
                         if (next.has(d.chatId)) next.delete(d.chatId);
@@ -339,32 +568,49 @@ function LeaveManagerTab() {
                           checked={selected.has(d.chatId)}
                           onCheckedChange={(v) => {
                             const next = new Set(selected);
-                            if (v) next.add(d.chatId); else next.delete(d.chatId);
+                            if (v) next.add(d.chatId);
+                            else next.delete(d.chatId);
                             setSelected(next);
                           }}
                           className="border-muted-foreground"
                         />
                       </TableCell>
-                      <TableCell className="max-w-[200px] truncate text-primary/90 font-medium" title={d.title ?? ""}>
+                      <TableCell
+                        className="max-w-[200px] truncate font-medium"
+                        title={d.title ?? ""}
+                        style={{
+                          color: d.classification === "medical"
+                            ? "rgba(52,211,153,0.9)"
+                            : d.classification === "non_medical"
+                            ? "rgba(248,113,113,0.85)"
+                            : "rgba(255,255,255,0.7)",
+                        }}
+                      >
                         {d.title || <span className="text-muted-foreground italic">—</span>}
                       </TableCell>
-                      <TableCell className="max-w-[240px] truncate">
+                      <TableCell>
+                        <ClassificationBadge cls={d.classification} />
+                      </TableCell>
+                      <TableCell className="max-w-[200px] truncate">
                         {d.url ? (
                           <a
                             href={d.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-primary/70 hover:text-primary hover:underline text-xs"
+                            className="text-primary/60 hover:text-primary hover:underline text-xs"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {d.url}
+                            {d.url.replace("https://t.me/", "@")}
                           </a>
                         ) : (
                           <span className="text-muted-foreground text-xs italic">خاصة — لا رابط</span>
                         )}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-[10px] py-0 border-muted-foreground/30">
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] py-0 border-muted-foreground/30"
+                        >
                           {d.chatType ?? "?"}
                         </Badge>
                       </TableCell>
@@ -412,7 +658,8 @@ function LeaveHistoryTab() {
       setSelectedIds(new Set());
       qc.invalidateQueries({ queryKey: ["/api/links"] });
     },
-    onError: (e: any) => toast({ title: "خطأ", description: e.message, variant: "destructive" }),
+    onError: (e: any) =>
+      toast({ title: "خطأ", description: e.message, variant: "destructive" }),
   });
 
   const selectedItems = items.filter((i) => selectedIds.has(i.id));
@@ -442,13 +689,20 @@ function LeaveHistoryTab() {
             {accounts.map((acc: any) => (
               <SelectItem key={acc.phone} value={acc.phone}>
                 <span className="font-mono text-xs">{acc.phone}</span>
-                {acc.label && <span className="mr-1 text-muted-foreground text-xs">({acc.label})</span>}
+                {acc.label && (
+                  <span className="mr-1 text-muted-foreground text-xs">({acc.label})</span>
+                )}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
 
-        <Button variant="outline" size="sm" onClick={() => refetch()} className="font-mono gap-2 border-card-border">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => refetch()}
+          className="font-mono gap-2 border-card-border"
+        >
           <RefreshCw className="w-3.5 h-3.5" />
           تحديث
         </Button>
@@ -512,7 +766,9 @@ function LeaveHistoryTab() {
               {items.map((item) => (
                 <TableRow
                   key={item.id}
-                  className={`border-card-border cursor-pointer ${selectedIds.has(item.id) ? "bg-primary/5" : "hover:bg-muted/30"}`}
+                  className={`border-card-border cursor-pointer ${
+                    selectedIds.has(item.id) ? "bg-primary/5" : "hover:bg-muted/30"
+                  }`}
                   onClick={() => {
                     const next = new Set(selectedIds);
                     if (next.has(item.id)) next.delete(item.id);
@@ -525,13 +781,17 @@ function LeaveHistoryTab() {
                       checked={selectedIds.has(item.id)}
                       onCheckedChange={(v) => {
                         const next = new Set(selectedIds);
-                        if (v) next.add(item.id); else next.delete(item.id);
+                        if (v) next.add(item.id);
+                        else next.delete(item.id);
                         setSelectedIds(next);
                       }}
                       className="border-muted-foreground"
                     />
                   </TableCell>
-                  <TableCell className="max-w-[180px] truncate text-primary/90" title={item.title ?? ""}>
+                  <TableCell
+                    className="max-w-[180px] truncate text-primary/90"
+                    title={item.title ?? ""}
+                  >
                     {item.title || <span className="text-muted-foreground italic">—</span>}
                   </TableCell>
                   <TableCell className="max-w-[220px] truncate">
@@ -543,13 +803,15 @@ function LeaveHistoryTab() {
                         className="text-primary/70 hover:text-primary hover:underline text-xs"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        {item.url}
+                        {item.url.replace("https://t.me/", "@")}
                       </a>
                     ) : (
                       <span className="text-muted-foreground text-xs italic">لا رابط</span>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{item.accountPhone}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {item.accountPhone}
+                  </TableCell>
                   <TableCell>
                     <Badge
                       variant={item.reason === "auto_cleanup" ? "secondary" : "outline"}
@@ -636,12 +898,19 @@ function ChannelLinksTab() {
               {channels?.map((ch, i) => (
                 <TableRow key={ch.id} className="border-card-border">
                   <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
-                  <TableCell className="text-primary font-medium max-w-[200px] truncate" title={ch.title ?? ""}>
+                  <TableCell
+                    className="text-primary font-medium max-w-[200px] truncate"
+                    title={ch.title ?? ""}
+                  >
                     {ch.title || <span className="text-muted-foreground italic">—</span>}
                   </TableCell>
                   <TableCell className="max-w-[280px] truncate">
-                    <a href={ch.url} target="_blank" rel="noopener noreferrer"
-                      className="text-primary/80 hover:text-primary hover:underline">
+                    <a
+                      href={ch.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary/80 hover:text-primary hover:underline"
+                    >
                       {ch.url}
                     </a>
                   </TableCell>
@@ -679,15 +948,24 @@ export default function Channels() {
 
       <Tabs defaultValue="leave" className="w-full">
         <TabsList className="bg-card/40 border border-card-border mb-4">
-          <TabsTrigger value="leave" className="font-mono text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5">
+          <TabsTrigger
+            value="leave"
+            className="font-mono text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5"
+          >
             <LogOut className="w-3.5 h-3.5" />
             إدارة المغادرة
           </TabsTrigger>
-          <TabsTrigger value="history" className="font-mono text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5">
+          <TabsTrigger
+            value="history"
+            className="font-mono text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5"
+          >
             <History className="w-3.5 h-3.5" />
             سجل المغادرة
           </TabsTrigger>
-          <TabsTrigger value="channels" className="font-mono text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5">
+          <TabsTrigger
+            value="channels"
+            className="font-mono text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5"
+          >
             <Radio className="w-3.5 h-3.5" />
             القنوات المكتشفة
           </TabsTrigger>

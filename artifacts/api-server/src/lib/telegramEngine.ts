@@ -447,7 +447,10 @@ async function handleJoinError(account: AccountDoc, link: TargetLinkDoc, err: un
 
     case "channels_limit": {
       await accountsCol.updateOne({ _id: account._id }, { $set: { status: "channels_limit", updatedAt: new Date() } });
-      await removeClient(account.phone);
+      // NOTE: Do NOT call removeClient here — keep the client in the pool so the
+      // leave engine can reuse the SAME connection. Removing + reconnecting causes
+      // AUTH_KEY_DUPLICATED because Telegram still considers the old session active.
+      // The idle-cleanup job will remove the client after 30 minutes of inactivity.
       const msg = `⛔ CHANNELS_TOO_MUCH — الحساب ${account.phone} وصل لحد القنوات`;
       await logActivity("join_failed", msg, account.phone, link.url, info.code);
       await logJoinJob(account.phone, link.url, "failed", info.code, "وصل لحد القنوات (500)");
