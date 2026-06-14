@@ -16,7 +16,7 @@ import { ObjectId } from "mongodb";
 import { TelegramClient, SentCode } from "@mtcute/node";
 import { collections } from "@workspace/db";
 import { logger } from "../lib/logger.js";
-import { createTempClient, getClient, getPooledClientOnly } from "../lib/clientPool.js";
+import { createTempClient, getClient, getPooledClientOnly, removeClient } from "../lib/clientPool.js";
 
 const router: IRouter = Router();
 
@@ -116,6 +116,11 @@ router.post("/auth/send-code", async (req, res): Promise<void> => {
   const existing = pendingAuth.get(phone);
   if (existing) { await existing.client.destroy().catch(() => {}); pendingAuth.delete(phone); }
 
+  // ── CRITICAL: Remove any engine-pooled client for this phone BEFORE connecting
+  // a new temp client. If both exist simultaneously, Telegram fires AUTH_KEY_DUPLICATED
+  // which revokes the session and wipes the account from the DB.
+  await removeClient(phone);
+
   let client: TelegramClient;
   try {
     client = await createTempClient();
@@ -128,7 +133,9 @@ router.post("/auth/send-code", async (req, res): Promise<void> => {
     await client.connect();
     const result = await client.sendCode({ phone });
     if (!(result instanceof SentCode)) {
-      await saveSession(phone, client);
+      // Already logged in on THIS client (shouldn't happen with fresh MemoryStorage,
+      // but handle it). Do NOT call saveSession here — it would export an empty
+      // session and overwrite the valid session stored in the DB.
       await client.destroy();
       res.json({ sent: false, alreadyLoggedIn: true });
       return;
@@ -156,6 +163,8 @@ router.post("/auth/verify-code", async (req, res): Promise<void> => {
     await saveSession(phone, session.client);
     pendingAuth.delete(phone);
     await session.client.destroy();
+    // Remove any stale engine-pooled client so the engine reconnects with the fresh session
+    await removeClient(phone);
     res.json({ success: true, userId: (user as any)?.id?.toString() ?? null, firstName: (user as any)?.firstName ?? null });
   } catch (err: any) {
     const errorMsg: string = err?.errorMessage ?? err?.message ?? "";
@@ -179,6 +188,8 @@ router.post("/auth/verify-password", async (req, res): Promise<void> => {
     await saveSession(phone, session.client);
     pendingAuth.delete(phone);
     await session.client.destroy();
+    // Remove any stale engine-pooled client so the engine reconnects with the fresh session
+    await removeClient(phone);
     res.json({ success: true, userId: (user as any)?.id?.toString() ?? null, firstName: (user as any)?.firstName ?? null });
   } catch (err: any) {
     res.status(400).json({ error: err?.errorMessage ?? err?.message ?? "UNKNOWN" });
