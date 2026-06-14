@@ -149,6 +149,17 @@ export interface InviteRequestDoc {
   updatedAt: Date;
 }
 
+export interface SyncedDialogDoc {
+  _id: ObjectId;
+  accountPhone: string;
+  chatId: string;
+  title: string | null;
+  username: string | null;
+  url: string | null;
+  chatType: string | null;
+  syncedAt: Date;
+}
+
 // ─── Connection singleton ─────────────────────────────────────────────────────
 
 let _client: MongoClient | null = null;
@@ -206,6 +217,7 @@ export const collections = {
   mongoCollections: () => col<MongoCollectionDoc>("mongo_collections"),
   learnedPatterns: () => col<LearnedPatternDoc>("learned_patterns"),
   inviteRequests: () => col<InviteRequestDoc>("invite_requests"),
+  syncedDialogs: () => col<SyncedDialogDoc>("synced_dialogs"),
 } as const;
 
 // ─── Init: create indexes + ensure bot_state singleton ───────────────────────
@@ -255,6 +267,11 @@ export async function initMongo(): Promise<void> {
   await db.collection("invite_requests").createIndex({ url: 1, accountPhone: 1 }, { unique: true });
   await db.collection("invite_requests").createIndex({ status: 1 });
   await db.collection("invite_requests").createIndex({ sentAt: -1 });
+
+  // synced_dialogs — full list of groups/channels per account (from Telegram sync)
+  await db.collection("synced_dialogs").createIndex({ accountPhone: 1, chatId: 1 }, { unique: true });
+  await db.collection("synced_dialogs").createIndex({ accountPhone: 1 });
+  await db.collection("synced_dialogs").createIndex({ syncedAt: -1 });
 
   // Ensure bot_state singleton exists
   await db.collection<BotStateDoc>("bot_state").updateOne(

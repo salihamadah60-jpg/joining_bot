@@ -122,15 +122,20 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
   const otpPollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { toast } = useToast();
 
+  // timestamp (Unix seconds) when send-code was called — used to filter old codes
+  const sendCodeTimestampRef = useRef<number>(0);
+
   // ── OTP auto-capture polling ──
   useEffect(() => {
     if (step !== "entering_code") {
       if (otpPollerRef.current) { clearInterval(otpPollerRef.current); otpPollerRef.current = null; }
       return;
     }
+    // Use the timestamp from when we sent the code so we only catch NEW codes
+    const after = sendCodeTimestampRef.current || Math.floor(Date.now() / 1000) - 30;
     const poll = async () => {
       try {
-        const r = await fetch(`/api/auth/pending-code/${encodeURIComponent(phone)}`);
+        const r = await fetch(`/api/auth/pending-code/${encodeURIComponent(phone)}?after=${after}`);
         const data = await r.json();
         if (data.found && data.code && !otpAutoFound) {
           setCode(data.code);
@@ -141,7 +146,7 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
       } catch (_) {}
     };
     poll();
-    otpPollerRef.current = setInterval(poll, 3000);
+    otpPollerRef.current = setInterval(poll, 2000);
     return () => { if (otpPollerRef.current) { clearInterval(otpPollerRef.current); otpPollerRef.current = null; } };
   }, [step, phone, otpAutoFound]);
 
@@ -164,6 +169,8 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
 
   const handleSend = () => {
     setStep("sending");
+    // Record timestamp so polling only picks up codes received AFTER this moment
+    sendCodeTimestampRef.current = Math.floor(Date.now() / 1000);
     sendCode.mutate(
       { data: { phone } },
       {

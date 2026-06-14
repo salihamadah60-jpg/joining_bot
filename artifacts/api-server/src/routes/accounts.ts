@@ -202,41 +202,70 @@ router.post("/accounts/:id/sync-dialogs", async (req, res): Promise<void> => {
 
   let count = 0;
   try {
-    // @mtcute getDialogs returns Promise<Dialog[]> — must await, then use .length
-    if (typeof (client as any).getDialogs === "function") {
-      const dialogs = await (client as any).getDialogs({ limit: 500 });
-      if (Array.isArray(dialogs)) {
-        count = dialogs.length;
-      }
+    if (typeof (client as any).getDialogs !== "function") {
+      throw new Error("getDialogs not available on client");
     }
-    // Fallback: if getDialogs not available or returned nothing, count from our join records
-    if (count === 0) {
-      const targetCol = await collections.targetLinks();
-      count = await targetCol.countDocuments({
-        usedByAccountPhone: account.phone,
-        status: "joined",
+
+    // Fetch full dialog list from Telegram directly
+    const dialogs: any[] = await (client as any).getDialogs({ limit: 500 });
+
+    if (Array.isArray(dialogs) && dialogs.length > 0) {
+      const syncedCol = await collections.syncedDialogs();
+      const syncedAt = new Date();
+
+      // Filter only groups and channels (not private chats with people)
+      const groupDialogs = dialogs.filter((d: any) => {
+        const type: string = d?.chat?.chatType ?? d?.chat?.type ?? "";
+        return type === "group" || type === "supergroup" || type === "channel" ||
+               type === "gigagroup" || type === "broadcast";
       });
+
+      // Delete old synced data for this account and replace with fresh data
+      await syncedCol.deleteMany({ accountPhone: account.phone });
+
+      if (groupDialogs.length > 0) {
+        const docs = groupDialogs.map((d: any) => {
+          const chat = d?.chat ?? {};
+          const chatId = String(chat?.id ?? chat?.chatId ?? "");
+          const title: string | null = chat?.title ?? chat?.displayName ?? null;
+          const username: string | null = chat?.username ?? null;
+          const chatType: string | null = chat?.chatType ?? chat?.type ?? null;
+          const url = username ? `https://t.me/${username}` : null;
+          return {
+            _id: new ObjectId(),
+            accountPhone: account.phone,
+            chatId,
+            title,
+            username,
+            url,
+            chatType,
+            syncedAt,
+          };
+        });
+
+        await syncedCol.insertMany(docs, { ordered: false }).catch(() => {});
+      }
+
+      count = groupDialogs.length;
     }
   } catch (err) {
-    logger.warn({ err, phone: account.phone }, "Could not fetch dialogs from Telegram, falling back to DB count");
-    // Fall back to counting joined links from our records
+    logger.warn({ err, phone: account.phone }, "getDialogs failed — falling back to JOINED collection count");
     try {
-      const targetCol = await collections.targetLinks();
-      count = await targetCol.countDocuments({
-        usedByAccountPhone: account.phone,
-        status: "joined",
-      });
+      const joinedCol = await collections.joined();
+      count = await joinedCol.countDocuments({ accountPhone: account.phone });
     } catch (_) {
       count = account.channelsCount ?? 0;
     }
   }
 
   await col.updateOne({ _id: new ObjectId(id) }, { $set: { channelsCount: count, updatedAt: new Date() } });
-  logger.info({ phone: account.phone, count }, "Dialog sync complete");
+  logger.info({ phone: account.phone, count }, "Dialog sync complete from Telegram");
   res.json({ channelsCount: count, synced: true });
 });
 
-/** GET /accounts/:id/groups — list all joined groups for an account */
+/** GET /accounts/:id/groups — list all groups/channels for an account
+ *  Priority: synced_dialogs (from Telegram live sync) → JOINED (bot-joined records)
+ */
 router.get("/accounts/:id/groups", async (req, res): Promise<void> => {
   const id = req.params["id"];
   if (!id || !ObjectId.isValid(id)) { res.status(400).json({ error: "Invalid id" }); return; }
@@ -244,6 +273,26 @@ router.get("/accounts/:id/groups", async (req, res): Promise<void> => {
   const account = await col.findOne({ _id: new ObjectId(id) });
   if (!account) { res.status(404).json({ error: "Account not found" }); return; }
 
+  // Use synced_dialogs if available (populated by sync button — real Telegram data)
+  const syncedCol = await collections.syncedDialogs();
+  const synced = await syncedCol
+    .find({ accountPhone: account.phone })
+    .sort({ syncedAt: -1 })
+    .toArray();
+
+  if (synced.length > 0) {
+    res.json(synced.map((g: any) => ({
+      id: g._id.toString(),
+      url: g.url ?? null,
+      groupTitle: g.title ?? null,
+      groupType: g.chatType ?? null,
+      joinedAt: g.syncedAt ? new Date(g.syncedAt).toISOString() : new Date().toISOString(),
+      source: "telegram",
+    })));
+    return;
+  }
+
+  // Fallback: JOINED collection (groups this bot joined on behalf of the account)
   const joinedCol = await collections.joined();
   const groups = await joinedCol
     .find({ accountPhone: account.phone })
@@ -256,6 +305,7 @@ router.get("/accounts/:id/groups", async (req, res): Promise<void> => {
     groupTitle: g.groupTitle ?? null,
     groupType: g.groupType ?? null,
     joinedAt: g.joinedAt ? new Date(g.joinedAt).toISOString() : new Date().toISOString(),
+    source: "bot",
   })));
 });
 

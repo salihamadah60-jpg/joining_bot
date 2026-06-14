@@ -20,6 +20,34 @@ import { createTempClient, getClient, getPooledClientOnly } from "../lib/clientP
 
 const router: IRouter = Router();
 
+/**
+ * Extract a 5-6 digit OTP from a Telegram service message.
+ * Telegram uses many different message formats across regions & languages.
+ */
+function extractOtpFromText(text: string): string | null {
+  if (!text) return null;
+
+  // Pattern 1: code at start of line (most common format)
+  // "12345 is your login code" / "12345 - ваш код"
+  let m = text.match(/^(\d{5,6})[\s\n\-–—]/m);
+  if (m?.[1]) return m[1];
+
+  // Pattern 2: code after common keywords with colon/space
+  // "Your code: 12345" / "Login code: 12345" / "كود: 12345"
+  m = text.match(/(?:code|كود|رمز|код)[:\s]+(\d{5,6})/i);
+  if (m?.[1]) return m[1];
+
+  // Pattern 3: code on its own line (service messages)
+  m = text.match(/^\s*(\d{5,6})\s*$/m);
+  if (m?.[1]) return m[1];
+
+  // Pattern 4: fallback — any word-boundary 5-6 digit number in the message
+  m = text.match(/\b(\d{5,6})\b/);
+  if (m?.[1]) return m[1];
+
+  return null;
+}
+
 interface PendingSession {
   client: TelegramClient;
   sentCode: SentCode;
@@ -242,10 +270,14 @@ router.get("/auth/pending-code/:phone", async (req, res): Promise<void> => {
       // Skip codes that arrived before we started watching
       if (afterTs && msgDate < afterTs) continue;
 
-      // Telegram OTP messages: "12345 is your login code" or "12345\n..."
-      const match = text.match(/^(\d{5,6})[\s\n\-–]/);
-      if (match?.[1]) {
-        res.json({ found: true, code: match[1], date: msgDate });
+      // Telegram OTP messages come in many formats — try all patterns:
+      // "12345 is your login code"
+      // "Your code: 12345"
+      // "Login code:\n12345"
+      // "<b>12345</b>" (service messages)
+      const code = extractOtpFromText(text);
+      if (code) {
+        res.json({ found: true, code, date: msgDate });
         return;
       }
     }

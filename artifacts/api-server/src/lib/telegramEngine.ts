@@ -140,14 +140,25 @@ async function tick(): Promise<void> {
 
     // ── Configurable sleep schedule ──
     const settingsKv = await getSettings();
-    const activeStartHour = Number(settingsKv["active_start_hour"] ?? 8);
+    const activeHoursCount = Number(settingsKv["active_hours_count"] ?? 18);
+    const sleepHours = 24 - activeHoursCount;
+
+    // Derive active start from blackout_start_hour (user sets stop time, start is auto)
+    // Fallback to legacy active_start_hour if blackout_start_hour not set yet
+    let activeStartHour: number;
+    if (settingsKv["blackout_start_hour"] !== undefined) {
+      const blackoutStart = Number(settingsKv["blackout_start_hour"]);
+      activeStartHour = ((blackoutStart + sleepHours) % 24 + 24) % 24;
+    } else {
+      activeStartHour = Number(settingsKv["active_start_hour"] ?? 8);
+    }
 
     const { setAiFilterEnabled } = await import("./aiFilter.js");
     const aiEnabled = settingsKv["ai_filter_enabled"] === "true" ||
       (settingsKv["ai_filter_enabled"] === undefined && !!process.env["GEMINI_API_KEY"]);
     setAiFilterEnabled(aiEnabled);
 
-    if (isBlackoutHourConfigurable(activeStartHour)) {
+    if (isBlackoutHourConfigurable(activeStartHour, activeHoursCount)) {
       // Check force-active override (user clicked "تشغيل فوراً")
       const forceUntil = state.forceActiveUntil ? new Date(state.forceActiveUntil) : null;
       if (forceUntil && forceUntil > new Date()) {
@@ -155,8 +166,8 @@ async function tick(): Promise<void> {
         logger.info({ forceUntil }, "Force-active override — skipping blackout");
       } else {
         const waitMs = msUntilActiveStartConfigurable(activeStartHour);
-        const endHour = (activeStartHour + 18) % 24;
-        logger.info({ waitMinutes: Math.ceil(waitMs / 60_000), activeStartHour, endHour }, "Blackout window — pausing");
+        const blackoutStart = (activeStartHour + activeHoursCount) % 24;
+        logger.info({ waitMinutes: Math.ceil(waitMs / 60_000), activeStartHour, blackoutStart }, "Blackout window — pausing");
         await logActivity("bot_stopped", `⏸ وقت الراحة — ينتهي الساعة ${activeStartHour}:00`);
         scheduleNext(waitMs);
         return;
