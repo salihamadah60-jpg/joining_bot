@@ -19,7 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Users, Plus, Trash2, KeyRound, CheckCircle2, XCircle, Wifi, WifiOff, RefreshCw, Radio, ChevronDown, ChevronRight, ExternalLink, List, Copy, Hash } from "lucide-react";
+import { Users, Plus, Trash2, KeyRound, CheckCircle2, XCircle, Wifi, WifiOff, RefreshCw, Radio, ChevronDown, ChevronRight, ExternalLink, List, Copy, Hash, Bug } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -124,6 +124,30 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
 
   // timestamp (Unix seconds) when send-code was called — used to filter old codes
   const sendCodeTimestampRef = useRef<number>(0);
+
+  // Debug panel state
+  const [showDebug, setShowDebug] = useState(false);
+  const [debugLoading, setDebugLoading] = useState(false);
+  const [debugData, setDebugData] = useState<Array<{
+    sender: string;
+    status: "ok" | "error";
+    error?: string;
+    messages: Array<{ text: string; date: number; extractedCode: string | null }>;
+  }>>([]);
+
+  const fetchDebugMessages = async () => {
+    setDebugLoading(true);
+    try {
+      const r = await fetch(`/api/auth/debug-messages/${encodeURIComponent(phone)}`);
+      const data = await r.json();
+      setDebugData(data.senders ?? []);
+      setShowDebug(true);
+    } catch (_) {
+      toast({ title: "خطأ", description: "فشل جلب الرسائل التشخيصية", variant: "destructive" });
+    } finally {
+      setDebugLoading(false);
+    }
+  };
 
   // ── OTP auto-capture polling ──
   useEffect(() => {
@@ -272,20 +296,15 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
                 أدخل الرمز المكون من {codeLength} أرقام
               </p>
               {!otpAutoFound && (
-                <p className="text-xs text-yellow-400 font-mono animate-pulse">
-                  🔍 بحث تلقائي...
-                </p>
+                <p className="text-xs text-yellow-400 font-mono animate-pulse">🔍 بحث...</p>
               )}
               {otpAutoFound && (
-                <p className="text-xs text-primary font-mono">✅ كود تلقائي</p>
+                <p className="text-xs text-primary font-mono">✅ تلقائي</p>
               )}
             </div>
+
             <div className="flex justify-center" dir="ltr">
-              <InputOTP
-                maxLength={codeLength}
-                value={code}
-                onChange={setCode}
-              >
+              <InputOTP maxLength={codeLength} value={code} onChange={setCode}>
                 <InputOTPGroup>
                   {Array.from({ length: codeLength }).map((_, i) => (
                     <InputOTPSlot key={i} index={i} />
@@ -293,6 +312,7 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
                 </InputOTPGroup>
               </InputOTP>
             </div>
+
             <Button
               onClick={handleVerifyCode}
               disabled={code.length < codeLength || verifyCode.isPending}
@@ -300,6 +320,100 @@ function AuthDialog({ phone, onDone }: { phone: string; onDone: () => void }) {
             >
               {verifyCode.isPending ? "جاري التحقق..." : "تأكيد الرمز"}
             </Button>
+
+            {/* ── Debug Panel ── */}
+            <div className="border border-border rounded-lg overflow-hidden">
+              <button
+                onClick={() => showDebug ? setShowDebug(false) : fetchDebugMessages()}
+                disabled={debugLoading}
+                className="w-full flex items-center gap-2 px-3 py-2 bg-muted/30 hover:bg-muted/50 transition-colors text-xs text-muted-foreground"
+              >
+                <Bug className="w-3 h-3 text-yellow-500 flex-shrink-0" />
+                <span className="flex-1 text-right font-mono">
+                  {debugLoading ? "جاري الجلب..." : "🔬 فحص رسائل المُرسِل (777000 / +42777)"}
+                </span>
+                {showDebug ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+              </button>
+
+              {showDebug && (
+                <div className="p-3 space-y-3 bg-background border-t border-border max-h-64 overflow-y-auto">
+                  {/* Refresh button */}
+                  <button
+                    onClick={fetchDebugMessages}
+                    disabled={debugLoading}
+                    className="text-[10px] text-primary hover:underline font-mono flex items-center gap-1"
+                  >
+                    <RefreshCw className="w-2.5 h-2.5" />
+                    تحديث
+                  </button>
+
+                  {debugData.length === 0 && (
+                    <p className="text-xs text-muted-foreground font-mono">لا توجد بيانات</p>
+                  )}
+
+                  {debugData.map((senderData) => (
+                    <div key={senderData.sender} className="space-y-1.5">
+                      {/* Sender header */}
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-bold font-mono px-1.5 py-0.5 rounded ${
+                          senderData.status === "ok"
+                            ? "bg-primary/10 text-primary border border-primary/20"
+                            : "bg-destructive/10 text-destructive border border-destructive/20"
+                        }`}>
+                          {senderData.sender === "777000" ? "Telegram 777000" : "+42777"}
+                        </span>
+                        {senderData.status === "error" && (
+                          <span className="text-[10px] text-destructive font-mono truncate">
+                            ✗ {senderData.error?.substring(0, 40)}
+                          </span>
+                        )}
+                        {senderData.status === "ok" && senderData.messages.length === 0 && (
+                          <span className="text-[10px] text-muted-foreground font-mono">لا رسائل</span>
+                        )}
+                      </div>
+
+                      {/* Messages */}
+                      {senderData.messages.map((msg, idx) => (
+                        <div
+                          key={idx}
+                          className={`rounded-md p-2 border text-xs font-mono space-y-1 ${
+                            msg.extractedCode
+                              ? "border-primary/30 bg-primary/5"
+                              : "border-border bg-muted/20"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-muted-foreground leading-snug break-all flex-1" dir="ltr">
+                              {msg.text || "(رسالة فارغة)"}
+                            </p>
+                            {msg.extractedCode && (
+                              <button
+                                onClick={() => {
+                                  setCode(msg.extractedCode!);
+                                  setOtpAutoFound(true);
+                                  setShowDebug(false);
+                                  toast({ title: "✅ تم استخدام الكود", description: `الكود: ${msg.extractedCode}` });
+                                }}
+                                className="flex-shrink-0 bg-primary text-primary-foreground text-[10px] font-bold px-2 py-0.5 rounded hover:bg-primary/90 transition-colors"
+                              >
+                                {msg.extractedCode} ←
+                              </button>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground">
+                            {msg.date ? new Date(msg.date * 1000).toLocaleTimeString("ar-SA") : "—"}
+                            {msg.extractedCode
+                              ? <span className="text-primary font-bold mr-2">كود مستخرج: {msg.extractedCode}</span>
+                              : <span className="text-muted-foreground mr-2">لم يُكتشف كود</span>
+                            }
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

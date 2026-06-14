@@ -297,4 +297,66 @@ router.get("/auth/pending-code/:phone", async (req, res): Promise<void> => {
   res.json({ found: false });
 });
 
+/**
+ * GET /auth/debug-messages/:phone
+ * Returns the last 8 raw messages from BOTH 777000 and +42777,
+ * so the user can see exactly which sender delivers OTP codes on their account.
+ * Includes full message text, date, extracted code (if any), and sender ID.
+ */
+router.get("/auth/debug-messages/:phone", async (req, res): Promise<void> => {
+  const phone = decodeURIComponent(req.params["phone"] ?? "");
+  if (!phone) { res.json({ senders: [] }); return; }
+
+  let client: any = getPooledClientOnly(phone);
+  if (!client) {
+    const pending = pendingAuth.get(phone);
+    if (pending?.client) client = pending.client;
+  }
+  if (!client) { res.json({ senders: [], error: "no_connection" }); return; }
+
+  const SENDER_IDS = ["777000", "42777"];
+  const results: Array<{
+    sender: string;
+    status: "ok" | "error";
+    error?: string;
+    messages: Array<{ text: string; date: number; extractedCode: string | null }>;
+  }> = [];
+
+  for (const senderId of SENDER_IDS) {
+    try {
+      const peer = await (client as any).resolvePeer(senderId);
+      const result = await (client as any).call({
+        _: "messages.getHistory",
+        peer,
+        offsetId: 0,
+        offsetDate: 0,
+        addOffset: 0,
+        limit: 8,
+        maxId: 0,
+        minId: 0,
+        hash: BigInt(0),
+      });
+      const messages: any[] = result?.messages ?? [];
+      results.push({
+        sender: senderId,
+        status: "ok",
+        messages: messages.map((m: any) => ({
+          text: m?.message ?? "",
+          date: m?.date ?? 0,
+          extractedCode: extractOtpFromText(m?.message ?? ""),
+        })),
+      });
+    } catch (err: any) {
+      results.push({
+        sender: senderId,
+        status: "error",
+        error: err?.message ?? String(err),
+        messages: [],
+      });
+    }
+  }
+
+  res.json({ senders: results });
+});
+
 export default router;
