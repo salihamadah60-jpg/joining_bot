@@ -117,11 +117,42 @@ export async function getClient(
         try {
           await client.importSession(sessionString);
         } catch (err) {
-          logger.warn({ phone, err }, "Failed to import session string, will connect fresh");
+          // CRITICAL SAFETY RULE: NEVER connect fresh when we have a stored session.
+          // Connecting with an empty MemoryStorage creates a brand-new auth key.
+          // Telegram will then detect two auth keys for the same account →
+          // AUTH_KEY_DUPLICATED → the engine wipes the session from DB → user must re-login.
+          // This is the #1 cause of repeated re-authentication. Fail hard instead.
+          logger.error({ phone, err }, "CRITICAL: Failed to import stored session — refusing to connect fresh. Stored session is protected.");
+          throw new Error(
+            `Cannot connect ${phone}: importSession failed (${(err as any)?.message ?? err}). ` +
+            `Refusing to connect fresh to protect the stored session in MongoDB. ` +
+            `Delete the account and re-add it if the session is genuinely corrupted.`
+          );
         }
       }
 
       await client.connect();
+
+      // After a successful connect with an imported session, export the refreshed session
+      // string and save it back to MongoDB. This keeps the DB in sync with the latest
+      // session state and prevents stale session issues on the next restart.
+      if (sessionString) {
+        try {
+          const refreshedSession = await client.exportSession();
+          if (refreshedSession && refreshedSession !== sessionString) {
+            const { collections } = await import("@workspace/db");
+            const col = await collections.accounts();
+            await col.updateOne(
+              { phone },
+              { $set: { sessionString: refreshedSession, updatedAt: new Date() } }
+            );
+            logger.debug({ phone }, "Session string refreshed in MongoDB after connect");
+          }
+        } catch (saveErr) {
+          // Non-fatal: log and continue — the old session is still valid
+          logger.warn({ phone, err: saveErr }, "Could not refresh session in MongoDB after connect — continuing with existing");
+        }
+      }
 
       pool.set(phone, { client, lastUsed: new Date(), phone });
       logger.info({ phone, device: (deviceProfile as any)?.deviceModel ?? "default" }, "TelegramClient connected");

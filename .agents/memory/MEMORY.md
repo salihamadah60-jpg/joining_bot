@@ -1,3 +1,4 @@
 - [Telegram Bot Manager Setup](telegram-bot-setup.md) — MongoDB-only architecture, MemoryStorage for Telegram sessions, no PostgreSQL/SQLite/Drizzle
 - [API Server Fast Startup](api-server-startup.md) — use `pnpm exec tsx src/index.ts` for dev; never rebuild with esbuild on every start
 - [Leave Engine Architecture](leave-engine.md) — separate leaveEngine.ts independent from join engine; channels_limit accounts auto-cleaned by background loop every 10 min
+- [Session Protection Rules](session-protection.md) — 5 hard rules to prevent involuntary re-auth; never wipe sessionString except on banned accounts

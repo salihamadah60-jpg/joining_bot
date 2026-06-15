@@ -6,15 +6,16 @@
  */
 
 export type TelegramErrorAction =
-  | "flood_wait"        // Wait N seconds, retry link later
-  | "peer_flood"        // Account severely flooded, pause 24h
-  | "channels_limit"    // Account has too many channels, pause
-  | "link_failed"       // Permanent failure for this link
-  | "already_joined"    // Link already joined (count as success)
-  | "auth_revoked"      // Session expired, account needs re-auth
-  | "account_banned"    // Account banned by Telegram
-  | "invite_request"    // Invite request sent — awaiting admin approval
-  | "unknown";          // Unexpected error, may retry
+  | "flood_wait"           // Wait N seconds, retry link later
+  | "peer_flood"           // Account severely flooded, pause 24h
+  | "channels_limit"       // Account has too many channels, pause
+  | "link_failed"          // Permanent failure for this link
+  | "already_joined"       // Link already joined (count as success)
+  | "auth_key_duplicated"  // Two connections share same key — remove client, retry, NEVER wipe session
+  | "auth_revoked"         // Session truly expired/revoked — account needs re-auth
+  | "account_banned"       // Account banned by Telegram
+  | "invite_request"       // Invite request sent — awaiting admin approval
+  | "unknown";             // Unexpected error, may retry
 
 export interface TelegramErrorInfo {
   action: TelegramErrorAction;
@@ -83,12 +84,18 @@ export function classifyTelegramError(err: unknown): TelegramErrorInfo {
     return { action: "already_joined", code };
   }
 
-  // Auth / session revoked errors
+  // AUTH_KEY_DUPLICATED: two connections exist with the same key — this does NOT mean
+  // the session is dead. It means we accidentally opened two connections simultaneously.
+  // NEVER wipe the session for this error. Just close the duplicate and reconnect.
+  if (code === "AUTH_KEY_DUPLICATED") {
+    return { action: "auth_key_duplicated", code };
+  }
+
+  // Auth / session truly revoked errors — session is dead, account needs re-login
   if (
     [
       "AUTH_KEY_UNREGISTERED",
       "AUTH_KEY_INVALID",
-      "AUTH_KEY_DUPLICATED",
       "SESSION_EXPIRED",
       "SESSION_REVOKED",
       "USER_DEACTIVATED",

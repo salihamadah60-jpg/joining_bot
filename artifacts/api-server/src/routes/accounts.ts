@@ -171,10 +171,18 @@ router.get("/accounts/:id/ping", async (req, res): Promise<void> => {
     res.json({ connected: true, firstName, username });
   } catch (err: any) {
     const msg: string = err?.message ?? String(err);
-    // Detect auth errors
-    const isAuthError = /AUTH_KEY|SESSION_EXPIRED|SESSION_REVOKED|UNAUTHORIZED/i.test(msg);
-    if (isAuthError) {
-      await col.updateOne({ _id: new ObjectId(id) }, { $set: { status: "needs_auth", sessionString: null, updatedAt: new Date() } });
+    // CRITICAL SAFETY RULE: NEVER wipe sessionString based on a ping failure.
+    // A ping can fail due to temporary network issues, Telegram server blips, or
+    // a duplicate-connection race condition — none of which mean the session is dead.
+    // The only errors that truly mean the session is gone are:
+    //   AUTH_KEY_UNREGISTERED, SESSION_REVOKED — and even then we keep the string
+    //   in case the user wants to recover it manually.
+    // AUTH_KEY_DUPLICATED is explicitly excluded: it means two connections existed,
+    // not that the session expired.
+    const isTrulyRevoked = /AUTH_KEY_UNREGISTERED|SESSION_REVOKED|USER_DEACTIVATED/i.test(msg);
+    if (isTrulyRevoked) {
+      // Only update status — NEVER set sessionString: null — keep it for recovery
+      await col.updateOne({ _id: new ObjectId(id) }, { $set: { status: "needs_auth", updatedAt: new Date() } });
     }
     res.json({ connected: false, reason: msg.substring(0, 100) });
   }

@@ -498,8 +498,24 @@ async function handleJoinError(account: AccountDoc, link: TargetLinkDoc, err: un
       break;
     }
 
+    case "auth_key_duplicated": {
+      // AUTH_KEY_DUPLICATED means two connections opened simultaneously for the same account.
+      // The session in MongoDB is STILL VALID — do NOT wipe it.
+      // Fix: remove the stale client from the pool so the next tick reconnects cleanly.
+      await removeClient(account.phone);
+      const dupMsg = `🔄 AUTH_KEY_DUPLICATED — إعادة اتصال الحساب ${account.phone} (الجلسة محفوظة — لا حاجة لإعادة تسجيل الدخول)`;
+      await logActivity("join_failed", dupMsg, account.phone, link.url, info.code);
+      await logJoinJob(account.phone, link.url, "failed", info.code, "تكرار مفتاح الاتصال — إعادة الاتصال تلقائياً");
+      logger.warn({ phone: account.phone, code: info.code }, "AUTH_KEY_DUPLICATED — client removed, session preserved in DB, will reconnect on next tick");
+      break;
+    }
+
     case "auth_revoked": {
-      await accountsCol.updateOne({ _id: account._id }, { $set: { status: "needs_auth", sessionString: null, updatedAt: new Date() } });
+      // Truly revoked session (AUTH_KEY_UNREGISTERED, SESSION_EXPIRED, SESSION_REVOKED, etc.)
+      // Only in this case do we mark the account as needs_auth.
+      // We deliberately keep sessionString in DB in case the user wants to inspect it —
+      // but we set status to needs_auth so the engine skips this account.
+      await accountsCol.updateOne({ _id: account._id }, { $set: { status: "needs_auth", updatedAt: new Date() } });
       await removeClient(account.phone);
       const msg = `🔑 ${info.code} — الحساب ${account.phone} يحتاج إعادة تسجيل الدخول`;
       await logActivity("join_failed", msg, account.phone, link.url, info.code);
