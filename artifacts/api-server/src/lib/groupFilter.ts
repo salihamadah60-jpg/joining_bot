@@ -140,7 +140,16 @@ export async function isRelevantGroupAsync(
  * regardless of AI or learned patterns.
  */
 const HARD_BLOCKED_KEYWORDS = [
-  // Arabic: Investment / Finance
+  // ── Medical excuse / fraud groups (NOT medical education) ──────────────────
+  // "اعذار طبية/طبيه" = groups about writing medical excuse notes (fraud)
+  // "سكليف" = specific group name pattern used by excuse-note groups
+  "سكليف",
+  "اعذار طبية", "اعذار طبيه", "الاعذار الطبية", "الاعذار الطبيه",
+  "عذر طبي", "عذر طبيه",
+  // ── Non-medical student-services academies ─────────────────────────────────
+  // "خدمات طلابية" = student administrative services, not medical education
+  "خدمات طلابية", "الخدمات الطلابية",
+  // ── Arabic: Investment / Finance ───────────────────────────────────────────
   "استثمار", "استثمارات", "مستثمر", "مستثمرين", "للمستثمرين",
   "عملات رقمية", "عملة رقمية",
   "كريبتو", "كريبتوا",
