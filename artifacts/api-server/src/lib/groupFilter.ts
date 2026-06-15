@@ -95,23 +95,64 @@ async function checkLearnedPatterns(
   return null;
 }
 
+// ─── Custom blocked keywords cache ───────────────────────────────────────────
+// Loaded from MongoDB settings (key: "custom_blocked_keywords") with a 60s TTL.
+// This lets admins add/remove keywords from the UI without restarting the server.
+
+let _customBlockedCache: string[] = [];
+let _customBlockedCacheTime = 0;
+const CUSTOM_BLOCKED_TTL = 60_000;
+
+export async function getCustomBlockedKeywords(): Promise<string[]> {
+  if (Date.now() - _customBlockedCacheTime < CUSTOM_BLOCKED_TTL) {
+    return _customBlockedCache;
+  }
+  try {
+    const { getSettings } = await import("@workspace/db");
+    const kv = await getSettings();
+    const raw = kv["custom_blocked_keywords"];
+    _customBlockedCache = raw ? JSON.parse(String(raw)) : [];
+    _customBlockedCacheTime = Date.now();
+  } catch {
+    // keep stale cache on error
+  }
+  return _customBlockedCache;
+}
+
+export function invalidateCustomBlockedCache(): void {
+  _customBlockedCacheTime = 0;
+}
+
 /**
  * 3-state async relevance check.
  *   true  → keep (relevant)
  *   false → not in scope
  *   null  → uncertain → pending_review
  *
- * Priority: hard-block → learned patterns → AI → keywords → uncertain
+ * Priority: hard-block → custom-block → learned patterns → AI → keywords → uncertain
  */
 export async function isRelevantGroupAsync(
   title: string | null | undefined,
   description?: string | null,
   sampleMessages: string[] = []
 ): Promise<boolean | null> {
-  // 0. Hard-block check — investment/crypto/ads → always reject immediately
+  // 0. Hard-block check — investment/crypto/ads/excuses → always reject immediately
   if (isHardBlocked(title, description, sampleMessages)) {
-    logger.info({ title }, "Group hard-blocked (investment/crypto/ads) — skipping");
+    logger.info({ title }, "Group hard-blocked (static list) — skipping");
     return false;
+  }
+
+  // 0b. Custom blocked keywords (user-defined via Settings UI)
+  const customBlocked = await getCustomBlockedKeywords();
+  if (customBlocked.length > 0) {
+    const combined = (
+      (title ?? "") + " " + (description ?? "") + " " + sampleMessages.join(" ")
+    ).toLowerCase();
+    const matchedKw = customBlocked.find((kw) => combined.includes(kw.toLowerCase()));
+    if (matchedKw) {
+      logger.info({ title, keyword: matchedKw }, "Group blocked by custom keyword — skipping");
+      return false;
+    }
   }
 
   // 1. Check learned patterns (user-confirmed decisions)
@@ -142,8 +183,9 @@ export async function isRelevantGroupAsync(
 const HARD_BLOCKED_KEYWORDS = [
   // ── Medical excuse / fraud groups (NOT medical education) ──────────────────
   // "اعذار طبية/طبيه" = groups about writing medical excuse notes (fraud)
-  // "سكليف" = specific group name pattern used by excuse-note groups
-  "سكليف",
+  // "سكليف" / "sickleave" = excuse-note group name patterns (Arabic & English)
+  "سكليف", "سكاليف",
+  "sickleave", "sick leave", "sick_leave",
   "اعذار طبية", "اعذار طبيه", "الاعذار الطبية", "الاعذار الطبيه",
   "عذر طبي", "عذر طبيه",
   // ── Non-medical student-services academies ─────────────────────────────────

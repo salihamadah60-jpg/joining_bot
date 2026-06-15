@@ -10,6 +10,7 @@ import { Router, type IRouter } from "express";
 import { getSettings, setSetting } from "@workspace/db";
 import { logger } from "../lib/logger.js";
 import { invalidateCredentialsCache } from "../lib/clientPool.js";
+import { invalidateCustomBlockedCache } from "../lib/groupFilter.js";
 
 const router: IRouter = Router();
 
@@ -82,6 +83,53 @@ router.put("/settings", async (req, res): Promise<void> => {
 
   logger.info({ keys: updates.map((u) => u.key) }, "Settings updated");
   res.json({ updated: updates.map((u) => u.key) });
+});
+
+// ─── Custom blocked keywords CRUD ────────────────────────────────────────────
+// Stored in settings collection as JSON array under key "custom_blocked_keywords".
+
+router.get("/settings/blocked-keywords", async (_req, res): Promise<void> => {
+  const kv = await getSettings();
+  const raw = kv["custom_blocked_keywords"];
+  const keywords: string[] = raw ? JSON.parse(String(raw)) : [];
+  res.json({ keywords });
+});
+
+router.post("/settings/blocked-keywords", async (req, res): Promise<void> => {
+  const body = req.body as { keyword?: string };
+  const keyword = typeof body?.keyword === "string" ? body.keyword.trim() : "";
+  if (!keyword) {
+    res.status(400).json({ error: "keyword is required" });
+    return;
+  }
+  const kv = await getSettings();
+  const raw = kv["custom_blocked_keywords"];
+  const keywords: string[] = raw ? JSON.parse(String(raw)) : [];
+  if (keywords.some((k) => k.toLowerCase() === keyword.toLowerCase())) {
+    res.json({ keywords, added: false, message: "الكلمة موجودة مسبقاً" });
+    return;
+  }
+  keywords.push(keyword);
+  await setSetting("custom_blocked_keywords", JSON.stringify(keywords));
+  invalidateCustomBlockedCache();
+  logger.info({ keyword }, "Custom blocked keyword added");
+  res.json({ keywords, added: true });
+});
+
+router.delete("/settings/blocked-keywords/:keyword", async (req, res): Promise<void> => {
+  const keyword = decodeURIComponent(req.params["keyword"] ?? "");
+  if (!keyword) {
+    res.status(400).json({ error: "keyword is required" });
+    return;
+  }
+  const kv = await getSettings();
+  const raw = kv["custom_blocked_keywords"];
+  const keywords: string[] = raw ? JSON.parse(String(raw)) : [];
+  const filtered = keywords.filter((k) => k.toLowerCase() !== keyword.toLowerCase());
+  await setSetting("custom_blocked_keywords", JSON.stringify(filtered));
+  invalidateCustomBlockedCache();
+  logger.info({ keyword }, "Custom blocked keyword removed");
+  res.json({ keywords: filtered, removed: true });
 });
 
 export default router;

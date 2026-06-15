@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useGetSettings, useGetTelegramStatus, useUpdateSettings, useGetBotStatus } from "@workspace/api-client-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Settings2, Key, ShieldCheck, ShieldX, Save,
   Eye, EyeOff, Moon, Sun, Bot, DatabaseBackup,
-  RefreshCw, Download, Clock, Zap, Play
+  RefreshCw, Download, Clock, Zap, Play, Ban, Plus, X
 } from "lucide-react";
 
 // ─── Time helpers ──────────────────────────────────────────────────────────────
@@ -176,6 +176,46 @@ export default function Settings() {
   // Timing limits
   const [dailyLimit, setDailyLimit] = useState("85");
   const [activeHoursCount, setActiveHoursCount] = useState("18");
+
+  // Custom blocked keywords
+  const [newKeyword, setNewKeyword] = useState("");
+  const { data: blockedKwData, refetch: refetchBlockedKw } = useQuery({
+    queryKey: ["/api/settings/blocked-keywords"],
+    queryFn: async () => {
+      const r = await fetch("/api/settings/blocked-keywords");
+      return r.json() as Promise<{ keywords: string[] }>;
+    },
+  });
+  const blockedKeywords: string[] = blockedKwData?.keywords ?? [];
+
+  const addKeyword = useMutation({
+    mutationFn: async (keyword: string) => {
+      const r = await fetch("/api/settings/blocked-keywords", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword }),
+      });
+      return r.json();
+    },
+    onSuccess: (data) => {
+      refetchBlockedKw();
+      setNewKeyword("");
+      if (data.added) toast({ title: "✅ تمت الإضافة" });
+      else toast({ title: "⚠️ " + (data.message ?? "الكلمة موجودة مسبقاً") });
+    },
+    onError: () => toast({ title: "خطأ في الإضافة", variant: "destructive" }),
+  });
+
+  const removeKeyword = useMutation({
+    mutationFn: async (keyword: string) => {
+      const r = await fetch(`/api/settings/blocked-keywords/${encodeURIComponent(keyword)}`, {
+        method: "DELETE",
+      });
+      return r.json();
+    },
+    onSuccess: () => { refetchBlockedKw(); toast({ title: "✅ تم الحذف" }); },
+    onError: () => toast({ title: "خطأ في الحذف", variant: "destructive" }),
+  });
 
   // Backup
   const [mongoBackupUrl, setMongoBackupUrl] = useState("");
@@ -376,14 +416,18 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="schedule" className="w-full">
-        <TabsList className="w-full mb-5 grid grid-cols-3 bg-muted/50 border border-border rounded-lg p-1 h-auto gap-1">
+        <TabsList className="w-full mb-5 grid grid-cols-4 bg-muted/50 border border-border rounded-lg p-1 h-auto gap-1">
           <TabsTrigger value="schedule" className="flex items-center gap-2 text-xs py-2 rounded-md data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-primary/30">
             <Clock className="w-3.5 h-3.5" />
-            الجدول والتوقيت
+            الجدول
           </TabsTrigger>
           <TabsTrigger value="telegram" className="flex items-center gap-2 text-xs py-2 rounded-md data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-primary/30">
             <Key className="w-3.5 h-3.5" />
             Telegram API
+          </TabsTrigger>
+          <TabsTrigger value="filter" className="flex items-center gap-2 text-xs py-2 rounded-md data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-primary/30">
+            <Ban className="w-3.5 h-3.5" />
+            الفلتر
           </TabsTrigger>
           <TabsTrigger value="backup" className="flex items-center gap-2 text-xs py-2 rounded-md data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-primary/30">
             <DatabaseBackup className="w-3.5 h-3.5" />
@@ -807,6 +851,94 @@ export default function Settings() {
               </div>
             </div>
           </div>
+        </TabsContent>
+
+        {/* ══════════════════════════════════════════
+            TAB 4: Filter — custom blocked keywords
+        ══════════════════════════════════════════ */}
+        <TabsContent value="filter" className="space-y-4 mt-0">
+
+          {/* ── Info banner ── */}
+          <div className="bg-card border border-border rounded-lg p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <Ban className="w-4 h-4 text-destructive" />
+              <p className="text-xs font-semibold text-foreground">الكلمات المحظورة المخصصة</p>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              أي مجموعة يحتوي عنوانها أو وصفها على إحدى هذه الكلمات سيتم رفضها تلقائياً بغض النظر عن بقية الفلاتر.
+              يسري التغيير خلال دقيقة دون إعادة تشغيل الخادم.
+            </p>
+          </div>
+
+          {/* ── Add new keyword ── */}
+          <div className="bg-card border border-border rounded-lg p-4 space-y-3">
+            <p className="text-xs font-semibold text-foreground border-b border-border pb-2">إضافة كلمة محظورة</p>
+            <div className="flex gap-2">
+              <Input
+                placeholder="اكتب الكلمة أو العبارة…"
+                value={newKeyword}
+                onChange={(e) => setNewKeyword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newKeyword.trim()) {
+                    addKeyword.mutate(newKeyword.trim());
+                  }
+                }}
+                className="h-8 text-sm bg-background border-border flex-1"
+                dir="rtl"
+              />
+              <Button
+                onClick={() => { if (newKeyword.trim()) addKeyword.mutate(newKeyword.trim()); }}
+                disabled={addKeyword.isPending || !newKeyword.trim()}
+                size="sm"
+                className="flex items-center gap-1.5 flex-shrink-0"
+              >
+                {addKeyword.isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                إضافة
+              </Button>
+            </div>
+          </div>
+
+          {/* ── Current keyword list ── */}
+          <div className="bg-card border border-border rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-border pb-2">
+              <p className="text-xs font-semibold text-foreground">الكلمات المحظورة الحالية</p>
+              <Badge variant="secondary" className="text-xs">{blockedKeywords.length}</Badge>
+            </div>
+            {blockedKeywords.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-4">لا توجد كلمات محظورة مخصصة بعد</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {blockedKeywords.map((kw) => (
+                  <div
+                    key={kw}
+                    className="flex items-center gap-1.5 bg-destructive/10 border border-destructive/20 text-destructive rounded-md px-2 py-1"
+                  >
+                    <span className="text-xs font-medium">{kw}</span>
+                    <button
+                      onClick={() => removeKeyword.mutate(kw)}
+                      disabled={removeKeyword.isPending}
+                      className="hover:opacity-70 transition-opacity flex-shrink-0"
+                      title="حذف"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Static hard-blocked note ── */}
+          <div className="bg-muted/30 border border-border rounded-lg p-4 space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground">محظورات ثابتة (مدمجة في الكود)</p>
+            <div className="flex flex-wrap gap-1.5">
+              {["اعذار طبية", "سكليف", "sickleave", "خدمات طلابية", "عقار", "عروض استثمار", "forex", "crypto", "مراهنات"].map((kw) => (
+                <Badge key={kw} variant="outline" className="text-xs text-muted-foreground font-mono">{kw}</Badge>
+              ))}
+              <Badge variant="outline" className="text-xs text-muted-foreground">+ المزيد…</Badge>
+            </div>
+          </div>
+
         </TabsContent>
       </Tabs>
     </div>

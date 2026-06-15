@@ -13,7 +13,8 @@ import { ObjectId } from "mongodb";
 import { collections } from "@workspace/db";
 import { logger } from "./logger.js";
 import { getClient, getPooledClientOnly, removeClient } from "./clientPool.js";
-import { isRelevantGroupAsync } from "./groupFilter.js";
+import { isRelevantGroupAsync, isHardBlocked } from "./groupFilter.js";
+import { parseJoinTarget } from "./telegramEngine.js";
 import { eventBus } from "./eventBus.js";
 import { getDeviceProfileForPhone } from "./deviceProfiles.js";
 
@@ -298,6 +299,104 @@ async function leaveTick(): Promise<void> {
     }
     // Pause between accounts
     await sleep(5000);
+  }
+
+  // After cleanup, use channels_limit accounts to pre-filter pending username links
+  // This avoids wasting active accounts' daily join quota on irrelevant groups.
+  for (const acc of limitAccounts) {
+    if (!acc.sessionString) continue;
+    try {
+      await prefetchPendingLinks(acc.phone, acc.sessionString);
+    } catch (e) {
+      logger.debug({ phone: acc.phone, err: e }, "Prefetch: failed for account (non-fatal)");
+    }
+    break; // One account is enough per tick
+  }
+}
+
+/**
+ * Use a channels_limit account to resolve pending username-based links WITHOUT joining.
+ * For each link with no groupTitle: try to get the entity via @mtcute client,
+ * run the relevance filter, and mark clearly-irrelevant links as "skipped" immediately.
+ * Only public username links can be pre-checked; invite-hash links are left as pending.
+ */
+async function prefetchPendingLinks(phone: string, sessionString: string): Promise<void> {
+  const linksCol = await collections.targetLinks();
+
+  // Get pending links that haven't been prefetched yet (no groupTitle saved)
+  const pending = await linksCol
+    .find({ status: "pending", groupTitle: { $exists: false } })
+    .limit(30)
+    .toArray();
+
+  if (pending.length === 0) return;
+
+  const deviceProfile = getDeviceProfileForPhone(phone);
+  const client = await getClient(phone, sessionString, deviceProfile.deviceModel, deviceProfile.systemVersion, deviceProfile.appVersion);
+
+  let prefetched = 0;
+  let skipped = 0;
+
+  for (const link of pending) {
+    const target = parseJoinTarget(link.url);
+
+    // Skip invite-hash links (can't resolve without joining)
+    if (target.startsWith("+") || target.includes("joinchat")) continue;
+    // Skip non-username targets
+    if (!target || target.startsWith("http")) continue;
+
+    try {
+      // Try to get entity info without joining.
+      // @mtcute exposes resolveUsername → returns a Chat-like object with title and type.
+      let title: string | null = null;
+      let chatType: string | null = null;
+
+      try {
+        const entity = await (client as any).resolveUsername(target);
+        title = entity?.title ?? entity?.firstName ?? null;
+        chatType = String(entity?.chatType ?? entity?.type ?? "");
+      } catch {
+        // resolveUsername failed — link stays as pending (normal join flow)
+        continue;
+      }
+
+      if (!title) continue;
+
+      const relevant = await isRelevantGroupAsync(title);
+
+      if (relevant === false) {
+        // Clearly not in scope — skip it now without ever joining
+        await linksCol.updateOne(
+          { _id: link._id },
+          {
+            $set: {
+              status: "skipped",
+              groupTitle: title,
+              groupType: chatType,
+              failReason: "not_in_scope_prefetch",
+              processedAt: new Date(),
+            },
+          }
+        );
+        skipped++;
+        logger.info({ url: link.url, title }, "Prefetch: link skipped (not in scope)");
+      } else {
+        // Relevant or uncertain — save the title so join engine doesn't re-fetch
+        await linksCol.updateOne(
+          { _id: link._id },
+          { $set: { groupTitle: title, groupType: chatType } }
+        );
+        prefetched++;
+      }
+
+      await sleep(300);
+    } catch (e) {
+      logger.debug({ url: link.url, err: e }, "Prefetch: could not resolve link (non-fatal)");
+    }
+  }
+
+  if (prefetched + skipped > 0) {
+    logger.info({ prefetched, skipped }, `Prefetch: resolved ${prefetched + skipped} links via ${phone}`);
   }
 }
 

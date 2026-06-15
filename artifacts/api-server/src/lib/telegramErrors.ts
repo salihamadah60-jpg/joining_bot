@@ -135,5 +135,20 @@ export function classifyTelegramError(err: unknown): TelegramErrorInfo {
     return { action: "link_failed", code };
   }
 
+  // Permanent link failures identifiable from message content (no Telegram RPC code).
+  // These come from @mtcute when the username/identifier simply doesn't exist:
+  //   "Peer with username Xyz was not found"
+  //   "Provided identifier 'Xyz' is not a channel"
+  // No point retrying — treat immediately as link_failed.
+  const codeLower = code.toLowerCase();
+  if (
+    codeLower.includes("was not found") ||
+    codeLower.includes("is not a channel") ||
+    codeLower.includes("not a channel") ||
+    codeLower.startsWith("provided identifier")
+  ) {
+    return { action: "link_failed", code };
+  }
+
   return { action: "unknown", code };
 }

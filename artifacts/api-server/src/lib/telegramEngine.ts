@@ -334,13 +334,15 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<vo
         { $set: { status: "joined", groupTitle, groupType, usedByAccountPhone: account.phone, processedAt: new Date() } }
       );
 
-      // Update account counters
+      // Channels: only increment channelsCount — NOT joinedCount or joinedToday.
+      // Subscribing to a channel is fundamentally different from joining a medical group.
+      // Daily join quota (joinedToday) applies only to actual group joins.
       await accountsCol.updateOne(
         { _id: account._id },
-        { $inc: { joinedCount: 1, joinedToday: 1, channelsCount: 1 }, $set: { lastJoinAt: new Date(), updatedAt: new Date() } }
+        { $inc: { channelsCount: 1 }, $set: { lastJoinAt: new Date(), updatedAt: new Date() } }
       );
 
-      const msg = `📡 قناة — تم الانضمام وحفظها: ${groupTitle ?? link.url}`;
+      const msg = `📡 قناة — تم الاشتراك وحفظها: ${groupTitle ?? link.url}`;
       await logActivity("join_success", msg, account.phone, link.url);
       await logJoinJob(account.phone, link.url, "success", "CHANNEL_TYPE", "قناة — تم الحفظ في مجموعة القنوات");
       eventBus.publish({ type: "channel_detected", message: msg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });

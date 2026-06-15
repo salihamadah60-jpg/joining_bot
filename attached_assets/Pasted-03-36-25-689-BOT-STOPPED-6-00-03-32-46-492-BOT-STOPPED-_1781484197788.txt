@@ -1,0 +1,93 @@
+03:36:25.689
+BOT_STOPPED
+⏸ وقت الراحة — ينتهي الساعة 6:00
+03:32:46.492
+BOT_STOPPED
+⏸ وقت الراحة — ينتهي الساعة 6:00
+03:31:17.185
+BOT_STOPPED
+⏸ وقت الراحة — ينتهي الساعة 6:00
+03:30:03.056
+JOIN_SUCCESS
+📡 قناة — تم الانضمام وحفظها: منصة رافت بلس التعليمية[+967772951869]https://t.me/rafatplus_edu
+03:22:10.171
+JOIN_SUCCESS
+✅ انضمام: *اعذار طبيه* "*سكليف*"🇸🇦📄 +966567563029 [+967772951869][+967772951869]https://t.me/+nnlJ84P6KlBjY2Zk
+03:14:21.178
+JOIN_FAILED
+❌ INVITE_HASH_EXPIRED: https://t.me/+f-ZYJgqAFsU1ZmI0[+967734549304]https://t.me/+f-ZYJgqAFsU1ZmI0
+03:04:57.659
+JOIN_SUCCESS
+📡 قناة — تم الانضمام وحفظها: سكليف( اعذار طبيه) صحتي[+967772951869]https://t.me/+Ym11tB_ttBZhMGE0
+03:04:55.243
+BOT_STOPPED
+⏸ وقت الراحة — ينتهي الساعة 6:00
+03:02:08.602
+BOT_STOPPED
+⏸ وقت الراحة — ينتهي الساعة 6:00
+03:00:49.219
+BOT_STOPPED
+⏸ وقت الراحة — ينتهي الساعة 6:00
+03:00:22.985
+BOT_STOPPED
+⏸ وقت الراحة — ينتهي الساعة 6:00
+02:50:32.603
+JOIN_FAILED
+❓ خطأ غير متوقع: Peer with username AlQahtani122 was not found — https://t.me/AlQahtani122 (محاولة 1/3 — إعادة المحاولة بعد ساعة)[+967734549304]https://t.me/AlQahtani122
+02:48:54.677
+BOT_STOPPED
+⏸ وقت الراحة — ينتهي الساعة 6:00
+02:47:17.806
+JOIN_SUCCESS
+📡 قناة — تم الانضمام وحفظها: 🎓 أكاديمية الخليج للخدمات الطلابية 🎓[+967734549304]https://t.me/+ciSZvGAxvXwyZTJk
+02:39:54.535
+JOIN_SUCCESS
+ℹ️ انضمام (خارج النطاق): مكتب الخليج [+967772951869][+967772951869]https://t.me/a12344a444
+02:39:51.150
+JOIN_SUCCESS
+ℹ️ انضمام (خارج النطاق): مكتب الخليج [+967772951869][+967772951869]https://t.me/a12344a444
+01:48:11.235
+JOIN_SUCCESS
+📡 قناة — تم الانضمام وحفظها: سكليف اجازة مرضية بصحتي[+967734549304]https://t.me/gehhehwjepw
+01:38:24.836
+JOIN_FAILED
+❓ خطأ غير متوقع: Peer with username pubgi10010000 was not found — https://t.me/pubgi10010000 (محاولة 1/3 — إعادة المحاولة بعد ساعة)[+967772951869]https://t.me/pubgi10010000
+01:31:05.298
+JOIN_SUCCESS
+📡 قناة — تم الانضمام وحفظها: دليل الثقة[+967734549304]https://t.me/Trust_Proof1
+01:22:41.189
+JOIN_FAILED
+❓ خطأ غير متوقع: Provided identifier "strbnaf" is not a channel — https://t.me/strbnaf (محاولة 1/3 — إعادة المحاولة بعد ساعة)[+967772951869]https://t.me/strbnaf
+01:14:09.744
+JOIN_SUCCESS
+📡 قناة — تم الانضمام وحفظها: ‏ ALQERSHI Academic Community 📢[+967734549304]https://t.me/ALQERSHIAcademic
+01:07:15.743
+INVITE_REQUEST
+📩 طلب انضمام مُرسَل: https://t.me/usjgvkdk [+967772951869][+967772951869]https://t.me/usjgvkdk
+00:56:57.264
+JOIN_SUCCESS
+📡 قناة — تم الانضمام وحفظها: سكاليف واعذار طبيه[+967734549304]https://t.me/EPU2050
+00:49:02.143
+JOIN_FAILED
+❓ خطأ غير متوقع: Provided identifier "HaneenEPU" is not a channel — https://t.me/HaneenEPU (محاولة 1/3 — إعادة المحاولة بعد ساعة)[+967772951869]https://t.me/HaneenEPU
+00:40:20.743
+JOIN_FAILED
+❓ خطأ غير متوقع: Provided identifier "HaneenEPU" is not a channel — http://t.me/HaneenEPU (محاولة 1/3 — إعادة المحاولة بعد ساعة)[+967734549304]http://t.me/HaneenEPU
+00:32:25.043
+JOIN_FAILED
+❓ خطأ غير متوقع: Provided identifier "AbuN_awa7" is not a channel — https://t.me/AbuN_awa7 (محاولة 1/3 — إعادة المحاولة بعد ساعة)[+967772951869]https://t.me/AbuN_awa7
+00:24:35.843
+JOIN_SUCCESS
+📡 قناة — تم الانضمام وحفظها: مكتب الافضل[+967734549304]https://t.me/aldoktora
+00:14:59.955
+JOIN_SUCCESS
+📡 قناة — تم الانضمام وحفظها: المناقشة[+967772951869]https://t.me/Abdullah12121121
+00:06:22.143
+JOIN_FAILED
+❌ INVITE_HASH_EXPIRED: https://t.me/+dTcRKo2SdnIwY2Ex[+967734549304]https://t.me/+dTcRKo2SdnIwY2Ex
+23:58:08.443
+JOIN_FAILED
+❓ خطأ غير متوقع: Peer with username ez_w378____ was not found — https://t.me/ez_w378____ (محاولة 1/3 — إعادة المحاولة بعد ساعة)[+967772951869]https://t.me/ez_w378____
+23:50:04.752
+JOIN_FAILED
+❓ خطأ غير متوقع: Provided identifier "sickleave_seha2026" is not a channel — https://t.me/sickleave_seha2026 (محاولة 1/3 — إعادة المحاولة بعد ساعة)[+967734549304]https://t.me/sickleave_seha2026
