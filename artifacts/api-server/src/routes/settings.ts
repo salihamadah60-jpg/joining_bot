@@ -17,10 +17,11 @@ router.get("/settings", async (_req, res): Promise<void> => {
   const kv = await getSettings();
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(kv)) {
-    if (key === "telegram_api_hash" && value) {
-      out[key] = value.slice(0, 4) + "****" + value.slice(-4);
+    const str = String(value ?? "");
+    if (key === "telegram_api_hash" && str) {
+      out[key] = str.slice(0, 4) + "****" + str.slice(-4);
     } else {
-      out[key] = value;
+      out[key] = str;
     }
   }
   res.json(out);
