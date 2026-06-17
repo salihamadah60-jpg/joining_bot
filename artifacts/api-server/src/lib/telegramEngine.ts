@@ -28,7 +28,13 @@ import {
   DAILY_LIMIT,
 } from "./timing.js";
 import { classifyTelegramError } from "./telegramErrors.js";
-import { isRelevantGroupAsync, categorizeChatType, observeGroupAfterJoin } from "./groupFilter.js";
+import {
+  isRelevantGroupAsync,
+  categorizeChatType,
+  observeGroupAfterJoin,
+  isHardBlocked,
+  getCustomBlockedKeywords,
+} from "./groupFilter.js";
 import { getClient, removeClient } from "./clientPool.js";
 import { addToLeaveQueue } from "./leaveEngine.js";
 import { getDeviceProfileForPhone } from "./deviceProfiles.js";
@@ -270,6 +276,31 @@ function pickAccount(usable: AccountDoc[]): AccountDoc {
 
 // ─── Join Attempt ────────────────────────────────────────────────────────────
 
+/**
+ * Safe leave helper — silently ignores errors (e.g. already left, no rights).
+ */
+async function safeLeave(client: any, chatId: string | number | null): Promise<void> {
+  if (!chatId) return;
+  try {
+    await client.leaveChat(Number(chatId));
+  } catch {
+    // ignore — left or never joined
+  }
+}
+
+/**
+ * Check a text string against all blocked keyword lists.
+ * Returns the matching keyword string, or null if not blocked.
+ */
+async function findBlockedKeyword(text: string): Promise<string | null> {
+  if (!text) return null;
+  const lower = text.toLowerCase();
+  if (isHardBlocked(text, null, [])) return "HARD_BLOCKED";
+  const custom = await getCustomBlockedKeywords();
+  const match = custom.find((kw) => lower.includes(kw.toLowerCase()));
+  return match ?? null;
+}
+
 async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<boolean> {
   const accountsCol = await collections.accounts();
   const targetLinksCol = await collections.targetLinks();
@@ -281,19 +312,18 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
     return false;
   }
 
-  // ── Check JOINED collection — skip if already joined ──
+  // ── 1. URL-level dedup: skip if already in JOINED collection ────────────
   const joinedCol = await collections.joined();
   const alreadyJoined = await joinedCol.findOne({ url: link.url });
   if (alreadyJoined) {
-    const msg = `✅ تم الانضمام مسبقاً لهذا الرابط من الحساب ${alreadyJoined.accountPhone}: ${link.url}`;
-    logger.info({ url: link.url, accountPhone: alreadyJoined.accountPhone }, "Link already in JOINED collection — skipping");
+    logger.info({ url: link.url, accountPhone: alreadyJoined.accountPhone }, "Link already in JOINED — skipping");
     await targetLinksCol.updateOne(
       { _id: link._id },
       { $set: { status: "joined", usedByAccountPhone: alreadyJoined.accountPhone, processedAt: new Date() } }
     );
-    await logActivity("join_success", msg, account.phone, link.url, "ALREADY_IN_JOINED");
+    await logActivity("join_success", `✅ تم الانضمام مسبقاً لهذا الرابط من الحساب ${alreadyJoined.accountPhone}: ${link.url}`, account.phone, link.url, "ALREADY_IN_JOINED");
     await logJoinJob(account.phone, link.url, "success", "ALREADY_IN_JOINED", `تم الانضمام مسبقاً من ${alreadyJoined.accountPhone}`);
-    return false; // not a new join — skip the full interval
+    return false;
   }
 
   const deviceProfile = {
@@ -316,10 +346,29 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
   }
 
   try {
-    // ── CRITICAL: Parse the join target (extract username from full URL) ──
+    // ── 2. CRITICAL: Parse the join target ──────────────────────────────────
     const joinTarget = parseJoinTarget(link.url);
-    logger.debug({ url: link.url, joinTarget, phone: account.phone }, "Joining with parsed target");
+    const isPrivateInvite = joinTarget.startsWith("https://");
 
+    // ── 3. PRE-JOIN keyword check (URL username for public links) ───────────
+    // For public groups the username is part of the URL — check it before joining.
+    // Private invite links (t.me/+HASH) cannot be pre-checked; they'll be
+    // checked post-join and left immediately if blocked.
+    if (!isPrivateInvite) {
+      const blockedKw = await findBlockedKeyword(joinTarget);
+      if (blockedKw) {
+        logger.info({ url: link.url, joinTarget, blockedKw }, "PRE-JOIN block: URL username matches blocked keyword");
+        await targetLinksCol.updateOne(
+          { _id: link._id },
+          { $set: { status: "failed", failReason: `BLOCKED_PRE:${blockedKw}`, processedAt: new Date() } }
+        );
+        await logActivity("join_failed", `🚫 محظور (قبل الانضمام): ${joinTarget} — ${blockedKw}`, account.phone, link.url, `BLOCKED_PRE:${blockedKw}`);
+        await logJoinJob(account.phone, link.url, "failed", `BLOCKED_PRE:${blockedKw}`, "رابط محظور (فحص قبل الانضمام)");
+        return false;
+      }
+    }
+
+    logger.debug({ url: link.url, joinTarget, phone: account.phone }, "Joining with parsed target");
     const joined = await client.joinChat(joinTarget);
 
     const groupTitle: string | null = (joined as any)?.title ?? null;
@@ -327,42 +376,76 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
     const rawType: string = String((joined as any)?.chatType ?? (joined as any)?.type ?? "");
     const groupType = categorizeChatType(rawType);
 
-    // ── Channel detection: save to Channels collection (don't leave — channels are useful) ──
+    // ── 4. BLOCK CHANNELS — leave immediately, no exceptions ────────────────
     if (groupType === "channel") {
-      const channelsCol = await collections.channels();
-      try {
-        await channelsCol.insertOne({ _id: new ObjectId(), url: link.url, title: groupTitle, detectedAt: new Date() });
-      } catch {}
-
+      await safeLeave(client, chatId);
+      logger.info({ url: link.url, groupTitle, phone: account.phone }, "Channel detected — left immediately (channels are fully blocked)");
       await targetLinksCol.updateOne(
         { _id: link._id },
-        { $set: { status: "joined", groupTitle, groupType, usedByAccountPhone: account.phone, processedAt: new Date() } }
+        { $set: { status: "failed", failReason: "CHANNEL_BLOCKED", processedAt: new Date() } }
       );
-
-      // Channels: only increment channelsCount — NOT joinedCount or joinedToday.
-      // Subscribing to a channel is fundamentally different from joining a medical group.
-      // Daily join quota (joinedToday) applies only to actual group joins.
-      await accountsCol.updateOne(
-        { _id: account._id },
-        { $inc: { channelsCount: 1 }, $set: { lastJoinAt: new Date(), updatedAt: new Date() } }
-      );
-
-      const msg = `📡 قناة — تم الاشتراك وحفظها: ${groupTitle ?? link.url}`;
-      await logActivity("join_success", msg, account.phone, link.url);
-      await logJoinJob(account.phone, link.url, "success", "CHANNEL_TYPE", "قناة — تم الحفظ في مجموعة القنوات");
-      eventBus.publish({ type: "channel_detected", message: msg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });
-      return true; // real action — respect the full interval
+      const msg = `📡 قناة محظورة — تم الخروج فوراً: ${groupTitle ?? link.url}`;
+      await logActivity("join_failed", msg, account.phone, link.url, "CHANNEL_BLOCKED");
+      await logJoinJob(account.phone, link.url, "failed", "CHANNEL_BLOCKED", "القنوات محظورة تماماً — تم الخروج فوراً");
+      return false;
     }
 
-    // ── Post-join observation: simulate reading messages (human-like behaviour) ──
+    // ── 5. POST-JOIN keyword check (title-based, covers private invite links) ─
+    // For private invite links that couldn't be pre-checked, verify the group
+    // title against all blocked keyword lists now. Leave immediately if blocked.
+    if (groupTitle) {
+      const blockedKw = await findBlockedKeyword(groupTitle);
+      if (blockedKw) {
+        await safeLeave(client, chatId);
+        logger.info({ url: link.url, groupTitle, blockedKw, phone: account.phone }, "POST-JOIN block: title matches blocked keyword — left");
+        await targetLinksCol.updateOne(
+          { _id: link._id },
+          { $set: { status: "failed", failReason: `BLOCKED_POST:${blockedKw}`, processedAt: new Date() } }
+        );
+        const msg = `🚫 محظور (بعد الانضمام): ${groupTitle} — ${blockedKw}`;
+        await logActivity("join_failed", msg, account.phone, link.url, `BLOCKED_POST:${blockedKw}`);
+        await logJoinJob(account.phone, link.url, "failed", `BLOCKED_POST:${blockedKw}`, "مجموعة محظورة (فحص بعد الانضمام) — تم الخروج");
+        return false;
+      }
+    }
+
+    // ── 6. CROSS-ACCOUNT dedup by group title ───────────────────────────────
+    // If ANY account already joined a group with this exact title (different URL),
+    // leave immediately. One group = one account, no exceptions.
+    if (groupTitle) {
+      const escapedTitle = groupTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const titleDup = await joinedCol.findOne({
+        groupTitle: { $regex: new RegExp(`^${escapedTitle}$`, "i") },
+      });
+      if (titleDup) {
+        await safeLeave(client, chatId);
+        logger.info({ url: link.url, groupTitle, existingAccount: titleDup.accountPhone }, "DUPLICATE GROUP (title match) — left immediately");
+        // Record this URL as joined (to prevent future attempts on this URL)
+        try {
+          await joinedCol.insertOne({
+            _id: new ObjectId(), url: link.url, accountPhone: titleDup.accountPhone,
+            groupTitle, groupType, joinedAt: new Date(),
+          });
+        } catch {}
+        await targetLinksCol.updateOne(
+          { _id: link._id },
+          { $set: { status: "joined", usedByAccountPhone: titleDup.accountPhone, processedAt: new Date() } }
+        );
+        const msg = `🔁 مكرر (تم الانضمام مسبقاً من ${titleDup.accountPhone}): ${groupTitle}`;
+        await logActivity("join_success", msg, account.phone, link.url, "TITLE_DUPLICATE");
+        await logJoinJob(account.phone, link.url, "success", "TITLE_DUPLICATE", `مكرر — ${titleDup.accountPhone} انضم مسبقاً`);
+        return false;
+      }
+    }
+
+    // ── 7. Post-join observation: simulate reading messages (human-like) ────
     let sampleMessages: string[] = [];
     if (chatId) sampleMessages = await observeGroupAfterJoin(client, chatId, link.url);
 
-    // ── AI / keyword relevance check (3-state: true / false / null=uncertain) ──
+    // ── 8. AI / keyword relevance check (3-state) ───────────────────────────
     const relevant = await isRelevantGroupAsync(groupTitle, null, sampleMessages);
 
     if (relevant === null) {
-      // ── Uncertain: needs user review ──
       await targetLinksCol.updateOne(
         { _id: link._id },
         { $set: { status: "pending_review", groupTitle, groupType, usedByAccountPhone: account.phone, processedAt: new Date() } }
@@ -371,10 +454,10 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
       await logActivity("pending_review", msg, account.phone, link.url);
       await logJoinJob(account.phone, link.url, "pending_review", "UNCERTAIN", "يحتاج مراجعة يدوية");
       eventBus.publish({ type: "pending_review", message: msg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });
-      return false; // uncertain — try next link quickly
+      return false;
     }
 
-    // ── Update TARGET_LINKS ──
+    // ── 9. Update TARGET_LINKS ───────────────────────────────────────────────
     await targetLinksCol.updateOne(
       { _id: link._id },
       {
@@ -389,7 +472,7 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
       }
     );
 
-    // ── Insert into JOINED (permanent dedup record) ──
+    // ── 10. Insert into JOINED (permanent dedup record) ──────────────────────
     try {
       await joinedCol.insertOne({
         _id: new ObjectId(),
@@ -401,11 +484,11 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
       });
     } catch {}
 
-    // ── Update account counters ──
+    // ── 11. Update account counters ──────────────────────────────────────────
     await accountsCol.updateOne(
       { _id: account._id },
       {
-        $inc: { joinedCount: 1, joinedToday: 1, channelsCount: 1 },
+        $inc: { joinedCount: 1, joinedToday: 1 },
         $set: { lastJoinAt: new Date(), updatedAt: new Date() },
       }
     );
@@ -417,9 +500,7 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
     await logActivity("join_success", msg, account.phone, link.url);
     await logJoinJob(account.phone, link.url, "success");
 
-    // ── Feature 4: Account Specialization ──────────────────────────────────
-    // If account is "medical" (or any non-"all" specialty) and the group is NOT
-    // relevant, auto-queue it for leaving so it doesn't waste the 500-group limit.
+    // ── 12. Account Specialization: auto-leave off-topic groups ──────────────
     if (relevant === false && account.specialty && account.specialty !== "all") {
       addToLeaveQueue(
         account.phone,
@@ -428,7 +509,6 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
       ).catch((e) => logger.warn({ phone: account.phone, err: e }, "Specialty auto-queue failed"));
     }
 
-    // Return true only for a confirmed relevant join — drives the interval decision in tick()
     return relevant === true;
   } catch (err) {
     await handleJoinError(account, link, err);
