@@ -30,6 +30,7 @@ import {
 import { classifyTelegramError } from "./telegramErrors.js";
 import { isRelevantGroupAsync, categorizeChatType, observeGroupAfterJoin } from "./groupFilter.js";
 import { getClient, removeClient } from "./clientPool.js";
+import { addToLeaveQueue } from "./leaveEngine.js";
 import { getDeviceProfileForPhone } from "./deviceProfiles.js";
 import { eventBus } from "./eventBus.js";
 
@@ -415,6 +416,17 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
     eventBus.publish({ type: "join_success", message: msg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });
     await logActivity("join_success", msg, account.phone, link.url);
     await logJoinJob(account.phone, link.url, "success");
+
+    // ── Feature 4: Account Specialization ──────────────────────────────────
+    // If account is "medical" (or any non-"all" specialty) and the group is NOT
+    // relevant, auto-queue it for leaving so it doesn't waste the 500-group limit.
+    if (relevant === false && account.specialty && account.specialty !== "all") {
+      addToLeaveQueue(
+        account.phone,
+        [{ url: link.url, chatId: chatId ? String(chatId) : undefined, title: groupTitle ?? undefined, chatType: groupType ?? undefined }],
+        `auto-specialty:${account.specialty}`
+      ).catch((e) => logger.warn({ phone: account.phone, err: e }, "Specialty auto-queue failed"));
+    }
 
     // Return true only for a confirmed relevant join — drives the interval decision in tick()
     return relevant === true;

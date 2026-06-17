@@ -44,6 +44,10 @@ export interface AccountDoc {
   systemVersion: string | null;
   appVersion: string | null;
   systemLangCode: string | null;
+  // ── Feature 4: Account Specialization ───────────────────────────────────────
+  // "all"     — joins any group (default behaviour)
+  // "medical" — only keeps medical groups; non-relevant joins are auto-queued for leaving
+  specialty: "all" | "medical" | "research" | "educational";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -309,6 +313,12 @@ export async function initMongo(): Promise<void> {
   // leave_queue — persistent queue for safe sequential leaving
   await db.collection("leave_queue").createIndex({ accountPhone: 1, status: 1 });
   await db.collection("leave_queue").createIndex({ addedAt: 1 });
+
+  // ── Backfill: add `specialty` default to existing accounts that predate the field ──
+  await db.collection("accounts").updateMany(
+    { specialty: { $exists: false } },
+    { $set: { specialty: "all" } }
+  );
 
   // Ensure bot_state singleton exists
   await db.collection<BotStateDoc>("bot_state").updateOne(

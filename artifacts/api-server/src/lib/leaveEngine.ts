@@ -64,7 +64,7 @@ async function leaveSingle(
 
 // ─── Get client with AUTH_KEY_DUPLICATED retry ─────────────────────────────
 
-async function getClientWithRetry(
+export async function getClientWithRetry(
   phone: string,
   sessionString: string,
   deviceProfile: any

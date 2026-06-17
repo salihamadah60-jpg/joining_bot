@@ -1,4 +1,5 @@
 import app from "./app";
+import foldersRouter from "./routes/folders";
 import { logger } from "./lib/logger";
 import { engineInit } from "./lib/telegramEngine";
 import { cleanupIdleClients } from "./lib/clientPool";
@@ -32,6 +33,7 @@ async function initMongoWithRetry(attempt = 1): Promise<void> {
       logger.error({ err: e }, "Failed to initialize bot engine");
     }
 
+    app.use("/api", foldersRouter);
     startAutoSync();
     startInviteRequestChecker();
     startLeaveEngine();

@@ -19,7 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Users, Plus, Trash2, KeyRound, CheckCircle2, XCircle, Wifi, WifiOff, RefreshCw, Radio, ChevronDown, ChevronRight, ExternalLink, List, Copy, Hash, Bug } from "lucide-react";
+import { Users, Plus, Trash2, KeyRound, CheckCircle2, XCircle, Wifi, WifiOff, RefreshCw, Radio, ChevronDown, ChevronRight, ExternalLink, List, Copy, Hash, Bug, FolderPlus, Stethoscope } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -687,6 +687,21 @@ export default function Accounts() {
     );
   };
 
+  const createMedicalFolder = useMutation({
+    mutationFn: async (phone: string) => {
+      const r = await fetch(`/api/accounts/${encodeURIComponent(phone)}/folders/medical`, { method: "POST" });
+      if (!r.ok) { const t = await r.json(); throw new Error(t?.error ?? "فشل"); }
+      return r.json() as Promise<{ ok: boolean; folderId: number; added: number; total: number; skipped: number; error?: string }>;
+    },
+    onSuccess: (data, phone) => {
+      toast({
+        title: `✅ مجلد طبي أُنشئ`,
+        description: `مجلد #${data.folderId} — أُضيف: ${data.added} | تعذّر: ${data.skipped}`,
+      });
+    },
+    onError: (e: any) => toast({ title: "❌ فشل إنشاء المجلد", description: e?.message, variant: "destructive" }),
+  });
+
   const reuseJoined = useMutation({
     mutationFn: async () => {
       const r = await fetch("/api/links/reuse-joined", { method: "POST" });
@@ -998,7 +1013,48 @@ export default function Accounts() {
                 </TableRow>
                 {expandedId === acc.id && (
                   <TableRow className="border-card-border bg-muted/10 hover:bg-muted/10">
-                    <TableCell colSpan={7} className="py-3 px-6">
+                    <TableCell colSpan={7} className="py-3 px-6 space-y-3">
+                      {/* Feature 4: Specialty + Feature 5: Folder */}
+                      <div className="flex items-center gap-3 flex-wrap">
+                        {/* Specialty selector */}
+                        <div className="flex items-center gap-2">
+                          <Stethoscope className="w-3.5 h-3.5 text-muted-foreground" />
+                          <span className="text-xs font-mono text-muted-foreground">التخصص:</span>
+                          <select
+                            value={(acc as any).specialty ?? "all"}
+                            onChange={(e) => {
+                              updateAccount.mutate(
+                                { id: acc.id, data: { specialty: e.target.value as any } },
+                                { onSuccess: () => { invalidate(); toast({ title: "✅ حُفظ التخصص" }); } }
+                              );
+                            }}
+                            className="text-xs font-mono bg-background border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:border-primary"
+                          >
+                            <option value="all">الكل</option>
+                            <option value="medical">طبي (يترك ما ليس طبياً)</option>
+                            <option value="research">بحثي</option>
+                            <option value="educational">تعليمي</option>
+                          </select>
+                        </div>
+
+                        {/* Create Medical Folder */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="font-mono text-xs gap-1.5 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                          onClick={() => createMedicalFolder.mutate(acc.phone)}
+                          disabled={createMedicalFolder.isPending && createMedicalFolder.variables === acc.phone}
+                        >
+                          {createMedicalFolder.isPending && createMedicalFolder.variables === acc.phone ? (
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <FolderPlus className="w-3 h-3" />
+                          )}
+                          إنشاء مجلد طبي
+                        </Button>
+                      </div>
+
+                      {/* Groups panel */}
                       <div className="border border-border rounded-lg p-3 bg-background">
                         <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
                           <List className="w-3.5 h-3.5 text-primary" />

@@ -24,6 +24,7 @@ function serializeAccount(a: any) {
     systemVersion: a.systemVersion ?? null,
     appVersion: a.appVersion ?? null,
     systemLangCode: a.systemLangCode ?? null,
+    specialty: a.specialty ?? "all",
     floodWaitUntil: a.floodWaitUntil ? new Date(a.floodWaitUntil).toISOString() : null,
     lastJoinAt: a.lastJoinAt ? new Date(a.lastJoinAt).toISOString() : null,
     nextJoinAllowedAt: a.nextJoinAllowedAt ? new Date(a.nextJoinAllowedAt).toISOString() : null,
@@ -87,6 +88,7 @@ router.post("/accounts", async (req, res): Promise<void> => {
       systemVersion: device.systemVersion,
       appVersion: device.appVersion,
       systemLangCode: device.systemLangCode,
+      specialty: "all" as const,
       createdAt: now,
       updatedAt: now,
     });
@@ -122,7 +124,7 @@ router.patch("/accounts/:id", async (req, res): Promise<void> => {
   const body = req.body as Record<string, any>;
   const allowed = ["label", "status", "sessionString", "joinedCount", "failedCount",
     "joinedToday", "dailyLimit", "channelsCount", "isPremium", "deviceModel",
-    "systemVersion", "appVersion", "systemLangCode"];
+    "systemVersion", "appVersion", "systemLangCode", "specialty"];
   const updates: Record<string, any> = { updatedAt: new Date() };
   for (const key of allowed) {
     if (key in body) updates[key] = body[key];
