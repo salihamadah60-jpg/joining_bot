@@ -44,10 +44,12 @@ export interface AccountDoc {
   systemVersion: string | null;
   appVersion: string | null;
   systemLangCode: string | null;
-  // ── Feature 4: Account Specialization ───────────────────────────────────────
-  // "all"     — joins any group (default behaviour)
-  // "medical" — only keeps medical groups; non-relevant joins are auto-queued for leaving
-  specialty: "all" | "medical" | "research" | "educational";
+  // ── Account Specialization ───────────────────────────────────────────────────
+  // "all" = joins any medical group (default).
+  // All other values are medical sub-specialties — only relevant medical groups
+  // are kept; others are auto-queued for leaving.
+  // See MEDICAL_SPECIALTIES in Accounts.tsx for the full list.
+  specialty: string;
   createdAt: Date;
   updatedAt: Date;
 }

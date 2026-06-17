@@ -1014,9 +1014,9 @@ export default function Accounts() {
                 {expandedId === acc.id && (
                   <TableRow className="border-card-border bg-muted/10 hover:bg-muted/10">
                     <TableCell colSpan={7} className="py-3 px-6 space-y-3">
-                      {/* Feature 4: Specialty + Feature 5: Folder */}
+                      {/* Specialty + Folder */}
                       <div className="flex items-center gap-3 flex-wrap">
-                        {/* Specialty selector */}
+                        {/* Specialty selector — Medical specialties only */}
                         <div className="flex items-center gap-2">
                           <Stethoscope className="w-3.5 h-3.5 text-muted-foreground" />
                           <span className="text-xs font-mono text-muted-foreground">التخصص:</span>
@@ -1024,16 +1024,68 @@ export default function Accounts() {
                             value={(acc as any).specialty ?? "all"}
                             onChange={(e) => {
                               updateAccount.mutate(
-                                { id: acc.id, data: { specialty: e.target.value as any } },
+                                { id: acc.id, data: { specialty: e.target.value } },
                                 { onSuccess: () => { invalidate(); toast({ title: "✅ حُفظ التخصص" }); } }
                               );
                             }}
-                            className="text-xs font-mono bg-background border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:border-primary"
+                            className="text-xs font-mono bg-background border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:border-primary max-w-[200px]"
                           >
-                            <option value="all">الكل</option>
-                            <option value="medical">طبي (يترك ما ليس طبياً)</option>
-                            <option value="research">بحثي</option>
-                            <option value="educational">تعليمي</option>
+                            <option value="all">الكل (طبي عام)</option>
+                            <optgroup label="── طب بشري ──">
+                              <option value="general">طب عام</option>
+                              <option value="internal">باطنة وأمراض داخلية</option>
+                              <option value="surgery">جراحة عامة</option>
+                              <option value="pediatrics">أطفال وحديثي الولادة</option>
+                              <option value="gynecology">نساء وتوليد</option>
+                              <option value="psychiatry">طب نفسي وعصبي</option>
+                              <option value="orthopedics">عظام وكسور</option>
+                              <option value="cardiology">قلبية وأوعية</option>
+                              <option value="neurology">أعصاب</option>
+                              <option value="dermatology">جلدية</option>
+                              <option value="oncology">أورام وسرطان</option>
+                              <option value="urology">مسالك بولية</option>
+                              <option value="ent">أنف وأذن وحنجرة</option>
+                              <option value="ophthalmology">عيون</option>
+                              <option value="emergency">طوارئ وإسعاف</option>
+                              <option value="icu">عناية مركزة</option>
+                              <option value="anesthesia">تخدير وإنعاش</option>
+                            </optgroup>
+                            <optgroup label="── أسنان ──">
+                              <option value="dentistry">أسنان عام</option>
+                              <option value="orthodontics">تقويم الأسنان — Ortho</option>
+                              <option value="endodontics">علاج جذور — Endo</option>
+                              <option value="prosthodontics">تعويضات أسنان</option>
+                              <option value="periodontics">أمراض اللثة — Perio</option>
+                              <option value="oral_surgery">جراحة الفم والفكين</option>
+                              <option value="pedodontics">أسنان الأطفال</option>
+                            </optgroup>
+                            <optgroup label="── صيدلة ──">
+                              <option value="pharmacy">صيدلة</option>
+                              <option value="clinical_pharmacy">صيدلة سريرية</option>
+                            </optgroup>
+                            <optgroup label="── تمريض ──">
+                              <option value="nursing">تمريض</option>
+                            </optgroup>
+                            <optgroup label="── مختبرات طبية ──">
+                              <option value="laboratory">مختبرات طبية</option>
+                              <option value="pathology">باثولوجيا وهيستولوجيا</option>
+                              <option value="microbiology">ميكروبيولوجيا</option>
+                              <option value="biochemistry">كيمياء حيوية</option>
+                            </optgroup>
+                            <optgroup label="── أشعة تشخيصية ──">
+                              <option value="radiology">أشعة تشخيصية</option>
+                              <option value="mri">رنين مغناطيسي MRI</option>
+                              <option value="ct">مقطعية CT</option>
+                              <option value="ultrasound">سونار وموجات</option>
+                            </optgroup>
+                            <optgroup label="── تخصصات صحية أخرى ──">
+                              <option value="physiotherapy">فيزيوثيرابي</option>
+                              <option value="optometry">بصريات</option>
+                              <option value="medical_coding">ترميز طبي</option>
+                              <option value="medical_technician">فني طبي</option>
+                              <option value="pct">رعاية مرضى PCT</option>
+                              <option value="cssd">تعقيم CSSD</option>
+                            </optgroup>
                           </select>
                         </div>
 

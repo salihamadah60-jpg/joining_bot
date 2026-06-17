@@ -301,6 +301,47 @@ async function findBlockedKeyword(text: string): Promise<string | null> {
   return match ?? null;
 }
 
+/**
+ * Pre-check if a join target is a broadcast channel WITHOUT joining.
+ * Uses raw TL calls so zero API trace is left on the account.
+ *
+ * Returns:
+ *   true  → confirmed broadcast channel → skip/block
+ *   false → confirmed group / supergroup → safe to join
+ *   null  → unable to determine (private link hash extraction failed, API error,
+ *            or Telegram returned an unexpected shape) → fall through to joinChat
+ */
+async function preCheckIsChannel(client: any, joinTarget: string): Promise<boolean | null> {
+  try {
+    const isPrivateInvite = joinTarget.startsWith("https://");
+
+    if (isPrivateInvite) {
+      // Extract hash from t.me/+HASH or t.me/joinchat/HASH
+      const m1 = joinTarget.match(/\/\+([A-Za-z0-9_-]+)/);
+      const m2 = joinTarget.match(/\/joinchat\/([A-Za-z0-9_-]+)/);
+      const hash = m1?.[1] ?? m2?.[1] ?? null;
+      if (!hash) return null;
+
+      const result: any = await (client as any).call({ _: "messages.checkChatInvite", hash });
+      if (!result) return null;
+      if (result._ === "chatInviteAlready") return !!(result.chat?.broadcast);
+      if (result._ === "chatInvite")        return !!(result.channel?.broadcast ?? result.broadcast);
+      return null;
+    } else {
+      // Public username — resolve without joining
+      const username = joinTarget.replace(/^@/, "");
+      const result: any = await (client as any).call({ _: "contacts.resolveUsername", username });
+      const chats: any[] = result?.chats ?? [];
+      if (chats.length > 0) return !!(chats[0]?.broadcast);
+      return null;
+    }
+  } catch {
+    // Pre-check is best-effort. If it fails, proceed with join as a fallback
+    // (the post-join channel guard still catches it and leaves immediately).
+    return null;
+  }
+}
+
 async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<boolean> {
   const accountsCol = await collections.accounts();
   const targetLinksCol = await collections.targetLinks();
@@ -350,10 +391,8 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
     const joinTarget = parseJoinTarget(link.url);
     const isPrivateInvite = joinTarget.startsWith("https://");
 
-    // ── 3. PRE-JOIN keyword check (URL username for public links) ───────────
+    // ── 3. PRE-JOIN keyword check (URL/username-based for public links) ────────
     // For public groups the username is part of the URL — check it before joining.
-    // Private invite links (t.me/+HASH) cannot be pre-checked; they'll be
-    // checked post-join and left immediately if blocked.
     if (!isPrivateInvite) {
       const blockedKw = await findBlockedKeyword(joinTarget);
       if (blockedKw) {
@@ -368,6 +407,22 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
       }
     }
 
+    // ── 4. PRE-JOIN channel type check WITHOUT joining ──────────────────────
+    // Uses raw TL calls (contacts.resolveUsername / messages.checkChatInvite)
+    // so the account never actually joins a channel. If the pre-check can't
+    // determine the type (null), we fall through to joinChat and check after.
+    const isChannelPre = await preCheckIsChannel(client, joinTarget);
+    if (isChannelPre === true) {
+      logger.info({ url: link.url, joinTarget, phone: account.phone }, "PRE-CHECK: broadcast channel — skipping WITHOUT joining");
+      await targetLinksCol.updateOne(
+        { _id: link._id },
+        { $set: { status: "failed", failReason: "CHANNEL_BLOCKED_PRE", processedAt: new Date() } }
+      );
+      await logActivity("join_failed", `📡 قناة محظورة (قبل الانضمام): ${joinTarget}`, account.phone, link.url, "CHANNEL_BLOCKED_PRE");
+      await logJoinJob(account.phone, link.url, "failed", "CHANNEL_BLOCKED_PRE", "قناة — تخطي بدون انضمام");
+      return false;
+    }
+
     logger.debug({ url: link.url, joinTarget, phone: account.phone }, "Joining with parsed target");
     const joined = await client.joinChat(joinTarget);
 
@@ -376,23 +431,22 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
     const rawType: string = String((joined as any)?.chatType ?? (joined as any)?.type ?? "");
     const groupType = categorizeChatType(rawType);
 
-    // ── 4. BLOCK CHANNELS — leave immediately, no exceptions ────────────────
+    // ── 5. POST-JOIN channel guard (safety net when pre-check returned null) ──
+    // This should rarely trigger — pre-check handles most cases. If it does,
+    // leave immediately to minimise the account's channel footprint.
     if (groupType === "channel") {
       await safeLeave(client, chatId);
-      logger.info({ url: link.url, groupTitle, phone: account.phone }, "Channel detected — left immediately (channels are fully blocked)");
+      logger.info({ url: link.url, groupTitle, phone: account.phone }, "POST-JOIN channel fallback — left immediately");
       await targetLinksCol.updateOne(
         { _id: link._id },
         { $set: { status: "failed", failReason: "CHANNEL_BLOCKED", processedAt: new Date() } }
       );
-      const msg = `📡 قناة محظورة — تم الخروج فوراً: ${groupTitle ?? link.url}`;
-      await logActivity("join_failed", msg, account.phone, link.url, "CHANNEL_BLOCKED");
-      await logJoinJob(account.phone, link.url, "failed", "CHANNEL_BLOCKED", "القنوات محظورة تماماً — تم الخروج فوراً");
+      await logActivity("join_failed", `📡 قناة محظورة (بعد الانضمام): ${groupTitle ?? link.url}`, account.phone, link.url, "CHANNEL_BLOCKED");
+      await logJoinJob(account.phone, link.url, "failed", "CHANNEL_BLOCKED", "قناة — خرجنا فوراً (fallback)");
       return false;
     }
 
-    // ── 5. POST-JOIN keyword check (title-based, covers private invite links) ─
-    // For private invite links that couldn't be pre-checked, verify the group
-    // title against all blocked keyword lists now. Leave immediately if blocked.
+    // ── 6. POST-JOIN keyword check (title-based, covers private invite links) ─
     if (groupTitle) {
       const blockedKw = await findBlockedKeyword(groupTitle);
       if (blockedKw) {
@@ -402,38 +456,8 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
           { _id: link._id },
           { $set: { status: "failed", failReason: `BLOCKED_POST:${blockedKw}`, processedAt: new Date() } }
         );
-        const msg = `🚫 محظور (بعد الانضمام): ${groupTitle} — ${blockedKw}`;
-        await logActivity("join_failed", msg, account.phone, link.url, `BLOCKED_POST:${blockedKw}`);
+        await logActivity("join_failed", `🚫 محظور (بعد الانضمام): ${groupTitle} — ${blockedKw}`, account.phone, link.url, `BLOCKED_POST:${blockedKw}`);
         await logJoinJob(account.phone, link.url, "failed", `BLOCKED_POST:${blockedKw}`, "مجموعة محظورة (فحص بعد الانضمام) — تم الخروج");
-        return false;
-      }
-    }
-
-    // ── 6. CROSS-ACCOUNT dedup by group title ───────────────────────────────
-    // If ANY account already joined a group with this exact title (different URL),
-    // leave immediately. One group = one account, no exceptions.
-    if (groupTitle) {
-      const escapedTitle = groupTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const titleDup = await joinedCol.findOne({
-        groupTitle: { $regex: new RegExp(`^${escapedTitle}$`, "i") },
-      });
-      if (titleDup) {
-        await safeLeave(client, chatId);
-        logger.info({ url: link.url, groupTitle, existingAccount: titleDup.accountPhone }, "DUPLICATE GROUP (title match) — left immediately");
-        // Record this URL as joined (to prevent future attempts on this URL)
-        try {
-          await joinedCol.insertOne({
-            _id: new ObjectId(), url: link.url, accountPhone: titleDup.accountPhone,
-            groupTitle, groupType, joinedAt: new Date(),
-          });
-        } catch {}
-        await targetLinksCol.updateOne(
-          { _id: link._id },
-          { $set: { status: "joined", usedByAccountPhone: titleDup.accountPhone, processedAt: new Date() } }
-        );
-        const msg = `🔁 مكرر (تم الانضمام مسبقاً من ${titleDup.accountPhone}): ${groupTitle}`;
-        await logActivity("join_success", msg, account.phone, link.url, "TITLE_DUPLICATE");
-        await logJoinJob(account.phone, link.url, "success", "TITLE_DUPLICATE", `مكرر — ${titleDup.accountPhone} انضم مسبقاً`);
         return false;
       }
     }
