@@ -11,6 +11,7 @@
 
 import { ObjectId } from "mongodb";
 import { collections } from "@workspace/db";
+import type { LeaveQueueDoc } from "@workspace/db";
 import { logger } from "./logger.js";
 import { getClient, getPooledClientOnly, removeClient } from "./clientPool.js";
 import { isRelevantGroupAsync, isHardBlocked } from "./groupFilter.js";
@@ -35,6 +36,12 @@ export interface LeaveResult {
 
 let leaveTimer: NodeJS.Timeout | null = null;
 let leaveRunning = false;
+
+// ─── Leave Queue processor state (per-account timers) ─────────────────────────
+const queueTimers = new Map<string, NodeJS.Timeout>();
+// Safe interval between leaves per account: 50-100 seconds with jitter
+const LEAVE_QUEUE_BASE_MS = 50_000;
+const LEAVE_QUEUE_JITTER_MS = 50_000;
 
 // ─── Core: leave a single group on a client ───────────────────────────────────
 
@@ -256,6 +263,241 @@ export async function autoCleanupAccount(phone: string): Promise<{
   return { checked: dialogs.length, left: success, reactivated };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// LEAVE QUEUE — persistent per-account sequential leave processor
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Add items to the persistent leave queue for an account.
+ * Duplicate items (same chatId or url already pending/processing) are skipped.
+ * Returns { added, existing } counts.
+ */
+export async function addToLeaveQueue(
+  accountPhone: string,
+  items: LeaveTarget[],
+  reason = "manual"
+): Promise<{ added: number; existing: number }> {
+  const qCol = await collections.leaveQueue();
+  let added = 0;
+  let existing = 0;
+
+  for (const item of items) {
+    if (!item.chatId && !item.url && !item.username) continue;
+
+    // Dedup check: is this item already in the queue (pending or processing)?
+    const orClauses: Record<string, unknown>[] = [];
+    if (item.chatId) orClauses.push({ chatId: item.chatId });
+    if (item.url) orClauses.push({ url: item.url });
+
+    const alreadyQueued = orClauses.length
+      ? await qCol.findOne({
+          accountPhone,
+          $or: orClauses as any,
+          status: { $in: ["pending", "processing"] },
+        })
+      : null;
+
+    if (alreadyQueued) { existing++; continue; }
+
+    await qCol.insertOne({
+      _id: new ObjectId(),
+      accountPhone,
+      url: item.url ?? null,
+      username: item.username ?? null,
+      chatId: item.chatId ?? null,
+      title: item.title ?? null,
+      chatType: item.chatType ?? null,
+      reason,
+      status: "pending",
+      errorMessage: null,
+      addedAt: new Date(),
+      processedAt: null,
+    });
+    added++;
+  }
+
+  // Kick off the queue processor for this account if we added items
+  if (added > 0) scheduleQueueTick(accountPhone, 2_000);
+
+  return { added, existing };
+}
+
+/**
+ * Get the current queue for one account.
+ */
+export async function getLeaveQueue(
+  accountPhone: string
+): Promise<LeaveQueueDoc[]> {
+  const qCol = await collections.leaveQueue();
+  return qCol.find({ accountPhone }).sort({ addedAt: 1 }).toArray();
+}
+
+/**
+ * Clear all pending (unprocessed) items from an account's queue.
+ */
+export async function clearLeaveQueue(accountPhone: string): Promise<number> {
+  const qCol = await collections.leaveQueue();
+  const result = await qCol.deleteMany({ accountPhone, status: "pending" });
+  return result.deletedCount;
+}
+
+/**
+ * Remove a single item from the queue by its _id string.
+ */
+export async function removeLeaveQueueItem(id: string): Promise<boolean> {
+  const qCol = await collections.leaveQueue();
+  const result = await qCol.deleteOne({ _id: new ObjectId(id), status: "pending" });
+  return result.deletedCount > 0;
+}
+
+/**
+ * Start the leave queue processor on server boot.
+ * Resumes any accounts that had pending items when the server last stopped.
+ */
+export async function startLeaveQueueProcessor(): Promise<void> {
+  const qCol = await collections.leaveQueue();
+
+  // Reset any items stuck in "processing" (interrupted by server restart)
+  await qCol.updateMany({ status: "processing" }, { $set: { status: "pending" } });
+
+  // Schedule a tick for every account with pending items
+  const phones = await qCol.distinct("accountPhone", { status: "pending" });
+  for (const phone of phones) {
+    scheduleQueueTick(phone as string, 5_000 + Math.random() * 10_000);
+  }
+  logger.info({ accounts: phones.length }, "Leave queue processor started");
+}
+
+// ─── Internal queue scheduler ─────────────────────────────────────────────────
+
+function scheduleQueueTick(phone: string, delayMs?: number): void {
+  const existing = queueTimers.get(phone);
+  if (existing) clearTimeout(existing);
+
+  const jitter = Math.random() * LEAVE_QUEUE_JITTER_MS;
+  const delay = delayMs ?? LEAVE_QUEUE_BASE_MS + jitter;
+
+  const t = setTimeout(() => {
+    processNextQueueItem(phone)
+      .catch((err) => logger.warn({ phone, err }, "Leave queue tick error"))
+      .finally(async () => {
+        // Re-schedule if more pending items exist
+        const qCol = await collections.leaveQueue();
+        const remaining = await qCol.countDocuments({ accountPhone: phone, status: "pending" });
+        if (remaining > 0) scheduleQueueTick(phone);
+        else queueTimers.delete(phone);
+      });
+  }, delay);
+
+  queueTimers.set(phone, t);
+}
+
+async function processNextQueueItem(phone: string): Promise<void> {
+  const qCol = await collections.leaveQueue();
+
+  // Atomically pick the oldest pending item and mark as "processing"
+  const item = await qCol.findOneAndUpdate(
+    { accountPhone: phone, status: "pending" },
+    { $set: { status: "processing" } },
+    { sort: { addedAt: 1 }, returnDocument: "after" }
+  );
+  if (!item) return; // Queue empty
+
+  const accountsCol = await collections.accounts();
+  const account = await accountsCol.findOne({ phone });
+
+  if (!account?.sessionString) {
+    // Account has no session — put item back and stop
+    await qCol.updateOne({ _id: item._id }, { $set: { status: "pending" } });
+    logger.warn({ phone }, "Leave queue: account has no session — pausing queue");
+    return;
+  }
+
+  let client: any;
+  try {
+    const dp = getDeviceProfileForPhone(phone);
+    client = await getClientWithRetry(phone, account.sessionString, dp);
+  } catch (e: any) {
+    await qCol.updateOne(
+      { _id: item._id },
+      { $set: { status: "failed", errorMessage: `Client error: ${e?.message}`, processedAt: new Date() } }
+    );
+    logger.warn({ phone, err: e }, "Leave queue: failed to get client");
+    return;
+  }
+
+  const target: LeaveTarget = {
+    url: item.url ?? undefined,
+    username: item.username ?? undefined,
+    chatId: item.chatId ?? undefined,
+    title: item.title ?? undefined,
+    chatType: item.chatType ?? undefined,
+  };
+
+  const result = await leaveSingle(client, target);
+
+  if (result.ok) {
+    await qCol.updateOne(
+      { _id: item._id },
+      { $set: { status: "done", processedAt: new Date() } }
+    );
+
+    // Log to left_groups history
+    const leftGroupsCol = await collections.leftGroups();
+    await leftGroupsCol.insertOne({
+      _id: new ObjectId(),
+      url: item.url ?? item.username ?? item.chatId ?? "",
+      accountPhone: phone,
+      title: item.title ?? null,
+      chatType: item.chatType ?? null,
+      reason: `${item.reason} (queue)`,
+      leftAt: new Date(),
+    });
+
+    // Remove from synced dialogs
+    if (item.chatId) {
+      const syncedCol = await collections.syncedDialogs();
+      await syncedCol.deleteOne({ accountPhone: phone, chatId: item.chatId });
+    }
+
+    // Update account channelsCount
+    await accountsCol.updateOne(
+      { phone },
+      { $inc: { channelsCount: -1 }, $set: { updatedAt: new Date() } }
+    );
+
+    const title = item.title ?? item.url ?? item.chatId ?? "?";
+    logger.info({ phone, title }, "Leave queue: item processed ✅");
+    eventBus.publish({
+      type: "left_group",
+      message: `🚪 غادر (طابور): ${title}`,
+      accountPhone: phone,
+      linkUrl: item.url ?? undefined,
+      timestamp: new Date().toISOString(),
+    });
+
+  } else {
+    const errorMsg = result.error ?? "unknown error";
+
+    // Detect FLOOD_WAIT — pause this account's queue for the required duration
+    const floodMatch = errorMsg.match(/FLOOD_WAIT[_\s]?(\d+)/i);
+    if (floodMatch) {
+      const waitSecs = Number(floodMatch[1]) + 30; // buffer
+      logger.warn({ phone, waitSecs }, "Leave queue: FLOOD_WAIT — pausing queue");
+      await qCol.updateOne({ _id: item._id }, { $set: { status: "pending" } });
+      scheduleQueueTick(phone, waitSecs * 1_000);
+      return;
+    }
+
+    // Permanent or transient failure
+    await qCol.updateOne(
+      { _id: item._id },
+      { $set: { status: "failed", errorMessage: errorMsg, processedAt: new Date() } }
+    );
+    logger.warn({ phone, title: item.title, error: errorMsg }, "Leave queue: item failed ❌");
+  }
+}
+
 // ─── Background scheduler ─────────────────────────────────────────────────────
 
 export function startLeaveEngine(): void {
@@ -332,7 +574,7 @@ async function prefetchPendingLinks(phone: string, sessionString: string): Promi
   if (pending.length === 0) return;
 
   const deviceProfile = getDeviceProfileForPhone(phone);
-  const client = await getClient(phone, sessionString, deviceProfile.deviceModel, deviceProfile.systemVersion, deviceProfile.appVersion);
+  const client = await getClient(phone, sessionString, deviceProfile);
 
   let prefetched = 0;
   let skipped = 0;

@@ -170,6 +170,22 @@ export interface LeftGroupDoc {
   leftAt: Date;
 }
 
+// Leave Queue — persistent per-account list of groups to leave (processed safely one-by-one)
+export interface LeaveQueueDoc {
+  _id: ObjectId;
+  accountPhone: string;
+  url: string | null;
+  username: string | null;
+  chatId: string | null;
+  title: string | null;
+  chatType: string | null;
+  reason: string;
+  status: "pending" | "processing" | "done" | "failed";
+  errorMessage: string | null;
+  addedAt: Date;
+  processedAt: Date | null;
+}
+
 // ─── Connection singleton ─────────────────────────────────────────────────────
 
 let _client: MongoClient | null = null;
@@ -229,6 +245,7 @@ export const collections = {
   inviteRequests: () => col<InviteRequestDoc>("invite_requests"),
   syncedDialogs: () => col<SyncedDialogDoc>("synced_dialogs"),
   leftGroups: () => col<LeftGroupDoc>("left_groups"),
+  leaveQueue: () => col<LeaveQueueDoc>("leave_queue"),
 } as const;
 
 // ─── Init: create indexes + ensure bot_state singleton ───────────────────────
@@ -288,6 +305,10 @@ export async function initMongo(): Promise<void> {
   await db.collection("left_groups").createIndex({ accountPhone: 1 });
   await db.collection("left_groups").createIndex({ leftAt: -1 });
   await db.collection("left_groups").createIndex({ url: 1 });
+
+  // leave_queue — persistent queue for safe sequential leaving
+  await db.collection("leave_queue").createIndex({ accountPhone: 1, status: 1 });
+  await db.collection("leave_queue").createIndex({ addedAt: 1 });
 
   // Ensure bot_state singleton exists
   await db.collection<BotStateDoc>("bot_state").updateOne(

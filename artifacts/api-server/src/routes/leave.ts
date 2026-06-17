@@ -11,7 +11,14 @@
 import { Router, type IRouter } from "express";
 import { ObjectId } from "mongodb";
 import { collections } from "@workspace/db";
-import { leaveGroupsBatch, autoCleanupAccount } from "../lib/leaveEngine.js";
+import {
+  leaveGroupsBatch,
+  autoCleanupAccount,
+  addToLeaveQueue,
+  getLeaveQueue,
+  clearLeaveQueue,
+  removeLeaveQueueItem,
+} from "../lib/leaveEngine.js";
 import type { LeaveTarget } from "../lib/leaveEngine.js";
 import { classifyGroupQuick } from "../lib/groupFilter.js";
 
@@ -146,6 +153,90 @@ router.post("/leave/rejoin", async (req, res): Promise<void> => {
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LEAVE QUEUE ROUTES — persistent per-account sequential leave queue
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/leave/queue/all — all queues grouped by account (must be before /:phone)
+router.get("/leave/queue/all", async (_req, res): Promise<void> => {
+  try {
+    const qCol = await collections.leaveQueue();
+    const items = await qCol.find({ status: { $ne: "done" } }).sort({ addedAt: 1 }).toArray();
+    const grouped: Record<string, { pending: number; processing: number; failed: number; items: any[] }> = {};
+    for (const item of items) {
+      if (!grouped[item.accountPhone]) grouped[item.accountPhone] = { pending: 0, processing: 0, failed: 0, items: [] };
+      const g = grouped[item.accountPhone]!;
+      if (item.status === "pending") g.pending++;
+      else if (item.status === "processing") g.processing++;
+      else if (item.status === "failed") g.failed++;
+      g.items.push({
+        id: item._id.toString(),
+        title: item.title,
+        chatId: item.chatId,
+        url: item.url,
+        status: item.status,
+        addedAt: new Date(item.addedAt).toISOString(),
+        errorMessage: item.errorMessage ?? null,
+      });
+    }
+    res.json(grouped);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/leave/queue/:phone — queue for specific account
+router.get("/leave/queue/:phone", async (req, res): Promise<void> => {
+  try {
+    const phone = decodeURIComponent(req.params["phone"]!);
+    const items = await getLeaveQueue(phone);
+    res.json({
+      pending: items.filter((i) => i.status === "pending").length,
+      processing: items.filter((i) => i.status === "processing").length,
+      done: items.filter((i) => i.status === "done").length,
+      failed: items.filter((i) => i.status === "failed").length,
+      items: items
+        .filter((i) => i.status !== "done")
+        .map((i) => ({
+          id: i._id.toString(),
+          title: i.title,
+          chatId: i.chatId,
+          url: i.url,
+          status: i.status,
+          addedAt: new Date(i.addedAt).toISOString(),
+          processedAt: i.processedAt ? new Date(i.processedAt).toISOString() : null,
+          errorMessage: i.errorMessage ?? null,
+        })),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/leave/queue — add items to the leave queue for an account
+router.post("/leave/queue", async (req, res): Promise<void> => {
+  try {
+    const { accountPhone, groups, reason } = req.body as { accountPhone: string; groups: LeaveTarget[]; reason?: string };
+    if (!accountPhone) { res.status(400).json({ error: "accountPhone required" }); return; }
+    if (!Array.isArray(groups) || groups.length === 0) { res.status(400).json({ error: "groups array required" }); return; }
+    const result = await addToLeaveQueue(accountPhone, groups, reason ?? "manual");
+    res.json(result);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/leave/queue/:phone — clear all pending items for an account
+router.delete("/leave/queue/:phone", async (req, res): Promise<void> => {
+  try {
+    const phone = decodeURIComponent(req.params["phone"]!);
+    const deleted = await clearLeaveQueue(phone);
+    res.json({ deleted });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/leave/queue/item/:id — remove a single item by _id
+router.delete("/leave/queue/item/:id", async (req, res): Promise<void> => {
+  try {
+    const removed = await removeLeaveQueueItem(req.params["id"]!);
+    res.json({ removed });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import {
   Radio, Download, LogOut, History, RefreshCw, RotateCcw,
   Loader2, AlertTriangle, CheckCircle2, Search, Zap, Stethoscope,
-  XCircle, HelpCircle, ChevronDown, ChevronUp,
+  XCircle, HelpCircle, ChevronDown, ChevronUp, Clock, Trash2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useListAccounts } from "@workspace/api-client-react";
@@ -90,6 +90,39 @@ async function batchLeave(
       reason,
     }),
   });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function addToLeaveQueue(
+  accountPhone: string,
+  groups: Dialog[],
+  reason: string
+): Promise<{ added: number; existing: number }> {
+  const r = await fetch("/api/leave/queue", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      accountPhone,
+      groups: groups.map((g) => ({
+        url: g.url,
+        username: g.username,
+        chatId: g.chatId,
+        title: g.title,
+        chatType: g.chatType,
+      })),
+      reason,
+    }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function fetchLeaveQueueStatus(phone: string): Promise<{
+  pending: number; processing: number; done: number; failed: number;
+  items: { id: string; title: string | null; status: string; addedAt: string; errorMessage: string | null }[];
+}> {
+  const r = await fetch(`/api/leave/queue/${encodeURIComponent(phone)}`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -267,6 +300,27 @@ function LeaveManagerTab() {
     onError: (e: any) => toast({ title: "خطأ", description: e.message, variant: "destructive" }),
   });
 
+  const queueMutation = useMutation({
+    mutationFn: ({ groups, reason }: { groups: Dialog[]; reason: string }) =>
+      addToLeaveQueue(selectedPhone, groups, reason),
+    onSuccess: (data) => {
+      toast({
+        title: `✅ أُضيف للطابور`,
+        description: `جديد: ${data.added} | موجود مسبقاً: ${data.existing}`,
+      });
+      setSelected(new Set());
+      qc.invalidateQueries({ queryKey: ["/api/leave/queue", selectedPhone] });
+    },
+    onError: (e: any) => toast({ title: "خطأ في الطابور", description: e.message, variant: "destructive" }),
+  });
+
+  const { data: queueStatus, refetch: refetchQueue } = useQuery({
+    queryKey: ["/api/leave/queue", selectedPhone],
+    queryFn: () => fetchLeaveQueueStatus(selectedPhone),
+    enabled: !!selectedPhone,
+    refetchInterval: 10_000,
+  });
+
   // Classification counts
   const counts = useMemo(() => {
     const medical = dialogs.filter((d) => d.classification === "medical").length;
@@ -408,28 +462,90 @@ function LeaveManagerTab() {
         )}
 
         {selectedDialogs.length > 0 && (
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() =>
-              leaveMutation.mutate({ groups: selectedDialogs, reason: "manual" })
-            }
-            disabled={leaveMutation.isPending}
-            className="font-mono gap-2 mr-auto"
-          >
-            {leaveMutation.isPending ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <LogOut className="w-3.5 h-3.5" />
-            )}
-            مغادرة المحددة ({selectedDialogs.length})
-          </Button>
+          <div className="mr-auto flex gap-2">
+            <Button
+              size="sm"
+              onClick={() => queueMutation.mutate({ groups: selectedDialogs, reason: "manual" })}
+              disabled={queueMutation.isPending}
+              className="font-mono gap-2 bg-orange-600 hover:bg-orange-700 text-white"
+            >
+              {queueMutation.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Clock className="w-3.5 h-3.5" />
+              )}
+              إضافة للطابور ({selectedDialogs.length})
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => leaveMutation.mutate({ groups: selectedDialogs, reason: "manual" })}
+              disabled={leaveMutation.isPending}
+              className="font-mono gap-2"
+            >
+              {leaveMutation.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <LogOut className="w-3.5 h-3.5" />
+              )}
+              مغادرة فورية ({selectedDialogs.length})
+            </Button>
+          </div>
         )}
       </div>
 
       {/* Leave results panel */}
       {leaveResults && (
         <LeaveResultsPanel results={leaveResults} onDismiss={() => setLeaveResults(null)} />
+      )}
+
+      {/* Leave Queue status panel */}
+      {queueStatus && (queueStatus.pending > 0 || queueStatus.processing > 0 || queueStatus.failed > 0) && (
+        <Card className="border-orange-500/30 bg-orange-950/20">
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2 text-xs font-mono text-orange-300">
+                <Clock className="w-3.5 h-3.5" />
+                <span>طابور المغادرة</span>
+                {queueStatus.processing > 0 && (
+                  <span className="flex items-center gap-1 text-yellow-400">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    يعالج {queueStatus.processing}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 text-xs font-mono">
+                {queueStatus.pending > 0 && <span className="text-orange-400">⏳ {queueStatus.pending} معلق</span>}
+                {queueStatus.failed > 0 && <span className="text-red-400">❌ {queueStatus.failed} فشل</span>}
+                <button
+                  onClick={() => refetchQueue()}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  title="تحديث"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+            {queueStatus.items.slice(0, 5).map((item) => (
+              <div key={item.id} className="text-xs font-mono text-muted-foreground py-0.5 flex items-center gap-2">
+                {item.status === "processing" ? (
+                  <Loader2 className="w-3 h-3 animate-spin text-yellow-400 flex-shrink-0" />
+                ) : item.status === "failed" ? (
+                  <XCircle className="w-3 h-3 text-red-400 flex-shrink-0" />
+                ) : (
+                  <Clock className="w-3 h-3 text-orange-400/60 flex-shrink-0" />
+                )}
+                <span className="truncate">{item.title ?? item.id}</span>
+                {item.errorMessage && <span className="text-red-400/70 truncate">— {item.errorMessage}</span>}
+              </div>
+            ))}
+            {queueStatus.items.length > 5 && (
+              <div className="text-xs font-mono text-muted-foreground mt-1">
+                … و {queueStatus.items.length - 5} آخرين
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Info banner for channels_limit */}

@@ -4,7 +4,7 @@ import { engineInit } from "./lib/telegramEngine";
 import { cleanupIdleClients } from "./lib/clientPool";
 import { startAutoSync } from "./lib/mongoSync";
 import { startInviteRequestChecker } from "./lib/inviteRequestChecker";
-import { startLeaveEngine } from "./lib/leaveEngine";
+import { startLeaveEngine, startLeaveQueueProcessor } from "./lib/leaveEngine";
 import { initMongo } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
@@ -35,6 +35,7 @@ async function initMongoWithRetry(attempt = 1): Promise<void> {
     startAutoSync();
     startInviteRequestChecker();
     startLeaveEngine();
+    await startLeaveQueueProcessor();
 
     setInterval(() => {
       cleanupIdleClients().catch((e) =>

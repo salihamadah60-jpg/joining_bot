@@ -246,8 +246,12 @@ async function tick(): Promise<void> {
 
     await setBotState({ currentAccountPhone: account.phone });
 
-    await attemptJoin(account, link);
-    scheduleNext(intervalMs);
+    // attemptJoin returns true if a real relevant join happened,
+    // false if the link was skipped / not-in-scope / already-joined.
+    // For skips, use a short interval so the engine immediately tries the next link
+    // instead of wasting the full 17-minute window on a non-productive action.
+    const wasRealJoin = await attemptJoin(account, link);
+    scheduleNext(wasRealJoin ? intervalMs : 8_000);
   } catch (err) {
     logger.error({ err }, "Bot engine tick error");
     if (engineRunning) scheduleNext(30_000);
@@ -265,7 +269,7 @@ function pickAccount(usable: AccountDoc[]): AccountDoc {
 
 // ─── Join Attempt ────────────────────────────────────────────────────────────
 
-async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<void> {
+async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<boolean> {
   const accountsCol = await collections.accounts();
   const targetLinksCol = await collections.targetLinks();
 
@@ -273,7 +277,7 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<vo
     await accountsCol.updateOne({ _id: account._id }, { $set: { status: "needs_auth", updatedAt: new Date() } });
     await logActivity("join_failed", `⚠️ الحساب ${account.phone} لا يملك جلسة نشطة — يرجى تسجيل الدخول`, account.phone, link.url, "NO_SESSION");
     await logJoinJob(account.phone, link.url, "failed", "NO_SESSION", "لا توجد جلسة نشطة");
-    return;
+    return false;
   }
 
   // ── Check JOINED collection — skip if already joined ──
@@ -288,7 +292,7 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<vo
     );
     await logActivity("join_success", msg, account.phone, link.url, "ALREADY_IN_JOINED");
     await logJoinJob(account.phone, link.url, "success", "ALREADY_IN_JOINED", `تم الانضمام مسبقاً من ${alreadyJoined.accountPhone}`);
-    return;
+    return false; // not a new join — skip the full interval
   }
 
   const deviceProfile = {
@@ -307,7 +311,7 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<vo
     logger.error({ err, phone: account.phone }, "Failed to get Telegram client");
     await logActivity("join_failed", `❌ فشل الاتصال للحساب ${account.phone}`, account.phone, link.url, "CLIENT_ERROR");
     await logJoinJob(account.phone, link.url, "failed", "CLIENT_ERROR", "فشل إنشاء الاتصال");
-    return;
+    return false;
   }
 
   try {
@@ -346,7 +350,7 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<vo
       await logActivity("join_success", msg, account.phone, link.url);
       await logJoinJob(account.phone, link.url, "success", "CHANNEL_TYPE", "قناة — تم الحفظ في مجموعة القنوات");
       eventBus.publish({ type: "channel_detected", message: msg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });
-      return;
+      return true; // real action — respect the full interval
     }
 
     // ── Post-join observation: simulate reading messages (human-like behaviour) ──
@@ -366,7 +370,7 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<vo
       await logActivity("pending_review", msg, account.phone, link.url);
       await logJoinJob(account.phone, link.url, "pending_review", "UNCERTAIN", "يحتاج مراجعة يدوية");
       eventBus.publish({ type: "pending_review", message: msg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });
-      return;
+      return false; // uncertain — try next link quickly
     }
 
     // ── Update TARGET_LINKS ──
@@ -411,8 +415,12 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<vo
     eventBus.publish({ type: "join_success", message: msg, accountPhone: account.phone, linkUrl: link.url, timestamp: new Date().toISOString() });
     await logActivity("join_success", msg, account.phone, link.url);
     await logJoinJob(account.phone, link.url, "success");
+
+    // Return true only for a confirmed relevant join — drives the interval decision in tick()
+    return relevant === true;
   } catch (err) {
     await handleJoinError(account, link, err);
+    return false;
   }
 }
 
