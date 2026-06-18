@@ -57,7 +57,7 @@ router.get("/accounts", async (req, res): Promise<void> => {
 });
 
 router.post("/accounts", async (req, res): Promise<void> => {
-  const body = req.body as { phone?: string; label?: string; status?: string };
+  const body = req.body as { phone?: string; label?: string; status?: string; specialty?: string };
   if (!body?.phone || typeof body.phone !== "string") {
     res.status(400).json({ error: "phone is required" });
     return;
@@ -88,7 +88,7 @@ router.post("/accounts", async (req, res): Promise<void> => {
       systemVersion: device.systemVersion,
       appVersion: device.appVersion,
       systemLangCode: device.systemLangCode,
-      specialty: "all" as const,
+      specialty: (body.specialty && typeof body.specialty === "string" ? body.specialty : "all"),
       createdAt: now,
       updatedAt: now,
     });

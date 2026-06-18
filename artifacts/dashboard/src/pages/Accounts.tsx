@@ -609,6 +609,7 @@ export default function Accounts() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [newPhone, setNewPhone] = useState("");
   const [newLabel, setNewLabel] = useState("");
+  const [newSpecialty, setNewSpecialty] = useState("all");
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
@@ -642,13 +643,14 @@ export default function Accounts() {
       return;
     }
     createAccount.mutate(
-      { data: { phone: newPhone, label: newLabel || undefined } },
+      { data: { phone: newPhone, label: newLabel || undefined, specialty: newSpecialty } as any },
       {
         onSuccess: () => {
           invalidate();
           setIsAddOpen(false);
           setNewPhone("");
           setNewLabel("");
+          setNewSpecialty("all");
           toast({ title: "تم إضافة الحساب" });
         },
         onError: (e: any) => {
@@ -832,6 +834,80 @@ export default function Accounts() {
                   placeholder="حساب رئيسي"
                   className="bg-background border-input"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1.5">
+                  <Stethoscope className="w-3.5 h-3.5 text-muted-foreground" />
+                  التخصص الطبي لهذا الحساب
+                </Label>
+                <select
+                  value={newSpecialty}
+                  onChange={(e) => setNewSpecialty(e.target.value)}
+                  className="w-full text-sm font-mono bg-background border border-input rounded px-3 py-2 text-foreground focus:outline-none focus:border-primary"
+                >
+                  <option value="all">الكل — ينضم لأي مجموعة طبية</option>
+                  <optgroup label="── طب بشري ──">
+                    <option value="general">طب عام</option>
+                    <option value="internal">باطنة وأمراض داخلية</option>
+                    <option value="surgery">جراحة عامة</option>
+                    <option value="pediatrics">أطفال وحديثي الولادة</option>
+                    <option value="gynecology">نساء وتوليد</option>
+                    <option value="psychiatry">طب نفسي وعصبي</option>
+                    <option value="orthopedics">عظام وكسور</option>
+                    <option value="cardiology">قلبية وأوعية</option>
+                    <option value="neurology">أعصاب</option>
+                    <option value="dermatology">جلدية</option>
+                    <option value="oncology">أورام وسرطان</option>
+                    <option value="urology">مسالك بولية</option>
+                    <option value="ent">أنف وأذن وحنجرة</option>
+                    <option value="ophthalmology">عيون</option>
+                    <option value="emergency">طوارئ وإسعاف</option>
+                    <option value="icu">عناية مركزة</option>
+                    <option value="anesthesia">تخدير وإنعاش</option>
+                  </optgroup>
+                  <optgroup label="── أسنان ──">
+                    <option value="dentistry">أسنان عام</option>
+                    <option value="orthodontics">تقويم الأسنان — Ortho</option>
+                    <option value="endodontics">علاج جذور — Endo</option>
+                    <option value="prosthodontics">تعويضات أسنان</option>
+                    <option value="periodontics">أمراض اللثة — Perio</option>
+                    <option value="oral_surgery">جراحة الفم والفكين</option>
+                    <option value="pedodontics">أسنان الأطفال</option>
+                  </optgroup>
+                  <optgroup label="── صيدلة ──">
+                    <option value="pharmacy">صيدلة</option>
+                    <option value="clinical_pharmacy">صيدلة سريرية</option>
+                  </optgroup>
+                  <optgroup label="── تمريض ──">
+                    <option value="nursing">تمريض</option>
+                  </optgroup>
+                  <optgroup label="── مختبرات طبية ──">
+                    <option value="laboratory">مختبرات طبية</option>
+                    <option value="pathology">باثولوجيا وهيستولوجيا</option>
+                    <option value="microbiology">ميكروبيولوجيا</option>
+                    <option value="biochemistry">كيمياء حيوية</option>
+                  </optgroup>
+                  <optgroup label="── أشعة تشخيصية ──">
+                    <option value="radiology">أشعة تشخيصية</option>
+                    <option value="mri">رنين مغناطيسي MRI</option>
+                    <option value="ct">مقطعية CT</option>
+                    <option value="ultrasound">سونار وموجات</option>
+                  </optgroup>
+                  <optgroup label="── تخصصات صحية أخرى ──">
+                    <option value="physiotherapy">فيزيوثيرابي</option>
+                    <option value="optometry">بصريات</option>
+                    <option value="medical_coding">ترميز طبي</option>
+                    <option value="medical_technician">فني طبي</option>
+                    <option value="pct">رعاية مرضى PCT</option>
+                    <option value="cssd">تعقيم CSSD</option>
+                  </optgroup>
+                  <optgroup label="── اختبارات ──">
+                    <option value="exams">اختبارات وشهادات طبية</option>
+                  </optgroup>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  الحساب سينضم فقط للمجموعات المصنَّفة بهذا التخصص — يمكن تغييره لاحقاً
+                </p>
               </div>
             </div>
             <DialogFooter>

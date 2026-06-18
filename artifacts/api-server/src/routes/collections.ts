@@ -32,10 +32,11 @@ function serializeCollection(c: any) {
   return {
     id: c._id.toString(),
     name: c.name,
-    connectionString: c.connectionString,
+    connectionString: c.type === "internal" ? "" : c.connectionString,
     dbName: c.dbName,
     linkField: c.linkField,
     specialty: c.specialty ?? null,
+    type: c.type ?? "external",
     isActive: c.isActive ?? true,
     lastSyncAt: c.lastSyncAt ? new Date(c.lastSyncAt).toISOString() : null,
     syncedCount: c.totalInQueue ?? c.syncedCount ?? 0,
@@ -123,6 +124,11 @@ router.post("/collections/:id/sync", async (req, res): Promise<void> => {
   const col = await collections.mongoCollections();
   const collection = await col.findOne({ _id: new ObjectId(id) });
   if (!collection) { res.status(404).json({ error: "Collection not found" }); return; }
+  // Internal specialty collections have no external MongoDB source — cannot be synced
+  if ((collection as any).type === "internal") {
+    res.status(400).json({ error: "Internal specialty collections cannot be synced — they are managed automatically" });
+    return;
+  }
 
   // Return immediately — sync runs in background
   res.json({ ok: true, background: true, message: "Sync started in background" });

@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { ObjectId } from "mongodb";
 import { collections } from "@workspace/db";
+import { eventBus } from "../lib/eventBus.js";
 
 const router: IRouter = Router();
 
@@ -311,6 +312,91 @@ router.post("/links/reuse-joined", async (req, res): Promise<void> => {
 
   res.json({ added, reset, skipped, total: joined.length });
 });
+
+// ─── AI Batch Specialty Classification ───────────────────────────────────────
+// POST /api/links/classify-batch
+// Classifies ALL joined + invite_request links that have a groupTitle but no specialty.
+// Returns immediately; runs in background; emits SSE events for progress.
+router.post("/links/classify-batch", async (req, res): Promise<void> => {
+  res.json({ ok: true, background: true, message: "AI classification started in background" });
+  runBatchClassification().catch((err) => {
+    eventBus.publish({
+      type: "classify_error",
+      message: `❌ فشل التصنيف: ${String(err)}`,
+      timestamp: new Date().toISOString(),
+    });
+  });
+});
+
+async function runBatchClassification(): Promise<void> {
+  const { classifySpecialtyBatched } = await import("../lib/aiSpecialtyClassifier.js");
+  const { ensureSpecialtyCollection, incrementSpecialtyCollectionCount } = await import("../lib/specialtyCollections.js");
+  const { logger } = await import("../lib/logger.js");
+
+  const col = await collections.targetLinks();
+
+  // Find all joined + invite_request links that have groupTitle but no specialty yet
+  const links = await col.find({
+    status: { $in: ["joined", "invite_request"] },
+    groupTitle: { $exists: true, $nin: [null, ""] },
+    $or: [{ specialty: { $exists: false } }, { specialty: null }],
+  }).toArray();
+
+  const total = links.length;
+
+  eventBus.publish({
+    type: "classify_start",
+    message: `🤖 بدء التصنيف الذكي — ${total.toLocaleString()} رابط`,
+    total,
+    classified: 0,
+    timestamp: new Date().toISOString(),
+  });
+
+  if (total === 0) {
+    eventBus.publish({
+      type: "classify_complete",
+      message: "✅ لا توجد روابط تحتاج تصنيفاً — الكل مصنَّف مسبقاً",
+      total: 0,
+      classified: 0,
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
+  const items = links.map((l) => ({ title: (l as any).groupTitle, url: l.url }));
+  let classified = 0;
+
+  const results = await classifySpecialtyBatched(items, (done, _total) => {
+    eventBus.publish({
+      type: "classify_progress",
+      message: `🔄 تم تصنيف ${done.toLocaleString()} من ${_total.toLocaleString()}...`,
+      total: _total,
+      classified: done,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  // Apply results and auto-create internal collections
+  for (let i = 0; i < links.length; i++) {
+    const specialty = results[i];
+    if (specialty) {
+      await col.updateOne({ _id: links[i]!._id }, { $set: { specialty } });
+      await ensureSpecialtyCollection(specialty);
+      await incrementSpecialtyCollectionCount(specialty, 1);
+      classified++;
+    }
+  }
+
+  eventBus.publish({
+    type: "classify_complete",
+    message: `✅ اكتمل التصنيف — ${classified.toLocaleString()} رابط صُنِّف من أصل ${total.toLocaleString()}`,
+    total,
+    classified,
+    timestamp: new Date().toISOString(),
+  });
+
+  logger.info({ total, classified }, "Batch specialty classification complete");
+}
 
 router.delete("/links/:id", async (req, res): Promise<void> => {
   const id = req.params["id"];

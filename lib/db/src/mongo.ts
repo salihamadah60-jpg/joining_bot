@@ -132,6 +132,14 @@ export interface MongoCollectionDoc {
   connectionString: string;
   dbName: string;
   linkField: string;
+  /** Medical specialty this source is tagged for. Links synced from it inherit this value. */
+  specialty?: string | null;
+  /**
+   * "external" = regular MongoDB source with connection string (default).
+   * "internal" = auto-created specialty container managed by the AI classifier.
+   *              No external connection — just a label for the specialty routing.
+   */
+  type?: "internal" | "external";
   isActive: boolean;
   lastSyncAt: Date | null;
   syncedCount: number;

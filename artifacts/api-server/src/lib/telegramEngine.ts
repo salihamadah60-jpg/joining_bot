@@ -511,6 +511,27 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
       }
     );
 
+    // ── 9.5. AI Specialty Classification (non-blocking, fire-and-forget) ─────
+    // Runs in background after the join is recorded — does NOT delay the engine.
+    if (groupTitle) {
+      (async () => {
+        try {
+          const { classifySpecialty } = await import("./aiSpecialtyClassifier.js");
+          const { ensureSpecialtyCollection, incrementSpecialtyCollectionCount } = await import("./specialtyCollections.js");
+          const detectedSpecialty = await classifySpecialty(groupTitle, link.url);
+          if (detectedSpecialty) {
+            const tlc = await collections.targetLinks();
+            await tlc.updateOne({ _id: link._id }, { $set: { specialty: detectedSpecialty } });
+            await ensureSpecialtyCollection(detectedSpecialty);
+            await incrementSpecialtyCollectionCount(detectedSpecialty, 1);
+            logger.debug({ groupTitle, specialty: detectedSpecialty }, "AI classified joined group");
+          }
+        } catch (e) {
+          logger.warn({ e }, "Post-join specialty classification failed — non-critical");
+        }
+      })();
+    }
+
     // ── 10. Insert into JOINED (permanent dedup record) ──────────────────────
     try {
       await joinedCol.insertOne({

@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { Database, Plus, Trash2, RefreshCw, Pencil, CheckCircle2, XCircle, Loader2, Stethoscope } from "lucide-react";
+import { Database, Plus, Trash2, RefreshCw, Pencil, CheckCircle2, XCircle, Loader2, Stethoscope, Brain, Sparkles } from "lucide-react";
 import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
@@ -209,6 +209,26 @@ export default function Collections() {
   const [syncStates, setSyncStates] = useState<Record<string, SyncState>>({});
   const sseRef = useRef<EventSource | null>(null);
 
+  // Global AI classification state
+  const [classifyState, setClassifyState] = useState<{
+    status: "idle" | "running" | "done" | "error";
+    message: string;
+    total: number;
+    classified: number;
+  }>({ status: "idle", message: "", total: 0, classified: 0 });
+
+  const handleClassifyBatch = async () => {
+    setClassifyState({ status: "running", message: "🚀 جاري بدء التصنيف الذكي...", total: 0, classified: 0 });
+    try {
+      const base = (import.meta.env.BASE_URL ?? "").replace(/\/$/, "");
+      const r = await fetch(`${base}/api/links/classify-batch`, { method: "POST" });
+      if (!r.ok) throw new Error(await r.text());
+    } catch (e: any) {
+      setClassifyState({ status: "error", message: e.message ?? "فشل", total: 0, classified: 0 });
+      toast({ title: "❌ فشل بدء التصنيف", description: e.message, variant: "destructive" });
+    }
+  };
+
   // ── SSE subscription for sync progress ─────────────────────────────────────
   useEffect(() => {
     const base = (import.meta.env.BASE_URL ?? "").replace(/\/$/, "");
@@ -218,6 +238,29 @@ export default function Collections() {
     es.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data);
+
+        // Handle AI classification events (no collectionId)
+        if (event.type === "classify_start") {
+          setClassifyState({ status: "running", message: event.message ?? "", total: event.total ?? 0, classified: 0 });
+          return;
+        }
+        if (event.type === "classify_progress") {
+          setClassifyState(prev => ({ ...prev, status: "running", message: event.message ?? "", classified: event.classified ?? 0, total: event.total ?? prev.total }));
+          return;
+        }
+        if (event.type === "classify_complete") {
+          setClassifyState({ status: "done", message: event.message ?? "", total: event.total ?? 0, classified: event.classified ?? 0 });
+          refetch();
+          toast({ title: "✅ اكتمل التصنيف الذكي", description: event.message });
+          setTimeout(() => setClassifyState({ status: "idle", message: "", total: 0, classified: 0 }), 12_000);
+          return;
+        }
+        if (event.type === "classify_error") {
+          setClassifyState(prev => ({ ...prev, status: "error", message: event.message ?? "" }));
+          toast({ title: "❌ فشل التصنيف", description: event.message, variant: "destructive" });
+          return;
+        }
+
         const cid: string | undefined = event.collectionId;
         if (!cid) return;
 
@@ -376,24 +419,71 @@ export default function Collections() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold font-mono flex items-center gap-2">
           <Database className="w-6 h-6 text-primary" />
           DATA_SOURCES
         </h1>
 
-        <Dialog open={isAddOpen} onOpenChange={(o) => { setIsAddOpen(o); if (o) setFormData(EMPTY_FORM); }}>
-          <DialogTrigger asChild>
-            <Button className="font-mono"><Plus className="w-4 h-4 mr-2" /> ADD_SOURCE</Button>
-          </DialogTrigger>
-          <DialogContent className="border-card-border bg-card">
-            <DialogHeader>
-              <DialogTitle className="font-mono">CONFIGURE_MONGO_SOURCE</DialogTitle>
-            </DialogHeader>
-            <CollectionForm formData={formData} setFormData={setFormData} onSave={handleAdd} loading={addCollection.isPending} />
-          </DialogContent>
-        </Dialog>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* AI Classify button */}
+          <Button
+            variant="outline"
+            onClick={handleClassifyBatch}
+            disabled={classifyState.status === "running"}
+            className="font-mono text-xs border-purple-500/40 text-purple-400 hover:bg-purple-500/10 gap-1.5"
+          >
+            {classifyState.status === "running"
+              ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> جاري التصنيف...</>
+              : <><Brain className="w-3.5 h-3.5" /> CLASSIFY_WITH_AI</>
+            }
+          </Button>
+
+          <Dialog open={isAddOpen} onOpenChange={(o) => { setIsAddOpen(o); if (o) setFormData(EMPTY_FORM); }}>
+            <DialogTrigger asChild>
+              <Button className="font-mono"><Plus className="w-4 h-4 mr-2" /> ADD_SOURCE</Button>
+            </DialogTrigger>
+            <DialogContent className="border-card-border bg-card">
+              <DialogHeader>
+                <DialogTitle className="font-mono">CONFIGURE_MONGO_SOURCE</DialogTitle>
+              </DialogHeader>
+              <CollectionForm formData={formData} setFormData={setFormData} onSave={handleAdd} loading={addCollection.isPending} />
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
+
+      {/* AI Classification progress */}
+      {classifyState.status !== "idle" && (
+        <div className={`rounded-lg border px-4 py-3 text-sm font-mono flex items-center gap-3 ${
+          classifyState.status === "error"
+            ? "border-destructive/40 bg-destructive/5 text-destructive"
+            : classifyState.status === "done"
+            ? "border-primary/40 bg-primary/5 text-primary"
+            : "border-purple-500/40 bg-purple-500/5 text-purple-300"
+        }`}>
+          {classifyState.status === "running" && <Loader2 className="w-4 h-4 animate-spin shrink-0" />}
+          {classifyState.status === "done" && <Sparkles className="w-4 h-4 shrink-0" />}
+          {classifyState.status === "error" && <XCircle className="w-4 h-4 shrink-0" />}
+          <div className="flex-1 min-w-0">
+            <div className="truncate">{classifyState.message}</div>
+            {classifyState.status === "running" && classifyState.total > 0 && (
+              <div className="mt-1.5 flex items-center gap-2">
+                <Progress
+                  value={Math.round((classifyState.classified / classifyState.total) * 100)}
+                  className="h-1.5 flex-1"
+                />
+                <span className="text-xs text-muted-foreground shrink-0">
+                  {classifyState.classified.toLocaleString()} / {classifyState.total.toLocaleString()}
+                </span>
+              </div>
+            )}
+            {classifyState.status === "running" && classifyState.total === 0 && (
+              <Progress value={null as any} className="h-1.5 mt-1.5 animate-pulse w-full" />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Edit dialog */}
       <Dialog open={editId !== null} onOpenChange={(o) => !o && setEditId(null)}>
@@ -422,38 +512,77 @@ export default function Collections() {
             </TableHeader>
             <TableBody className="font-mono text-sm">
               {cols?.map((col) => {
+                const isInternal = (col as any).type === "internal";
                 const sync = syncStates[col.id] ?? IDLE_SYNC;
                 const isRunning = sync.status === "running";
                 const pct = sync.total > 0 ? Math.round((sync.processed / sync.total) * 100) : (isRunning ? null : 0);
 
                 return (
-                  <TableRow key={col.id} className="border-card-border">
-                    <TableCell className="font-medium text-primary">{col.name}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      <div>DB: {col.dbName}</div>
-                      <div className="text-xs">Field: {col.linkField}</div>
-                    </TableCell>
-                    <TableCell>
-                      <SpecialtySelect
-                        value={(col as any).specialty ?? ""}
-                        onChange={v => setSpecialtyMutation.mutate({ id: col.id, specialty: v })}
-                        className="max-w-[180px]"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {col.isActive
-                        ? <Badge className="bg-primary text-primary-foreground">ACTIVE</Badge>
-                        : <Badge variant="secondary">INACTIVE</Badge>}
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      <div>{col.lastSyncAt ? formatDistanceToNow(new Date(col.lastSyncAt), { addSuffix: true }) : 'NEVER'}</div>
-                      {col.syncedCount !== undefined && (
-                        <div className="text-xs text-primary">{(col.syncedCount as number).toLocaleString()} records</div>
+                  <TableRow key={col.id} className={`border-card-border ${isInternal ? "bg-purple-500/3" : ""}`}>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        {isInternal && <Brain className="w-3.5 h-3.5 text-purple-400 shrink-0" />}
+                        <span className={isInternal ? "text-purple-300" : "text-primary"}>{col.name}</span>
+                      </div>
+                      {isInternal && (
+                        <div className="text-xs text-muted-foreground mt-0.5">مُنشأ تلقائياً بواسطة AI</div>
                       )}
                     </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {isInternal
+                        ? <div className="text-xs text-purple-400/70 italic">داخلي — لا يحتاج اتصال</div>
+                        : (
+                          <>
+                            <div>DB: {col.dbName}</div>
+                            <div className="text-xs">Field: {col.linkField}</div>
+                          </>
+                        )
+                      }
+                    </TableCell>
+                    <TableCell>
+                      {isInternal
+                        ? (
+                          <span className="text-xs font-mono text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
+                            {(col as any).specialty ?? "—"}
+                          </span>
+                        )
+                        : (
+                          <SpecialtySelect
+                            value={(col as any).specialty ?? ""}
+                            onChange={v => setSpecialtyMutation.mutate({ id: col.id, specialty: v })}
+                            className="max-w-[180px]"
+                          />
+                        )
+                      }
+                    </TableCell>
+                    <TableCell>
+                      {isInternal
+                        ? <Badge className="bg-purple-500/20 text-purple-300 border border-purple-500/30 font-mono text-xs">INTERNAL</Badge>
+                        : col.isActive
+                          ? <Badge className="bg-primary text-primary-foreground">ACTIVE</Badge>
+                          : <Badge variant="secondary">INACTIVE</Badge>
+                      }
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground">
+                      {isInternal
+                        ? (
+                          <div className="text-xs text-purple-400">
+                            {(col.syncedCount as number ?? 0).toLocaleString()} روابط مُصنَّفة
+                          </div>
+                        )
+                        : (
+                          <>
+                            <div>{col.lastSyncAt ? formatDistanceToNow(new Date(col.lastSyncAt), { addSuffix: true }) : 'NEVER'}</div>
+                            {col.syncedCount !== undefined && (
+                              <div className="text-xs text-primary">{(col.syncedCount as number).toLocaleString()} records</div>
+                            )}
+                          </>
+                        )
+                      }
+                    </TableCell>
                     <TableCell className="text-right">
-                      {/* Sync progress indicator */}
-                      {sync.status !== "idle" && (
+                      {/* Sync progress indicator — only for external collections */}
+                      {!isInternal && sync.status !== "idle" && (
                         <div className="mb-2 text-right space-y-1">
                           <div className="flex items-center justify-end gap-1.5 text-xs">
                             {sync.status === "running" && <Loader2 className="w-3 h-3 animate-spin text-primary" />}
@@ -465,10 +594,7 @@ export default function Collections() {
                           </div>
                           {(isRunning || sync.status === "done") && sync.total > 0 && (
                             <div className="flex items-center justify-end gap-2">
-                              <Progress
-                                value={pct ?? 0}
-                                className="h-1 w-28"
-                              />
+                              <Progress value={pct ?? 0} className="h-1 w-28" />
                               <span className="text-xs text-muted-foreground w-8 text-left">{pct ?? 0}%</span>
                             </div>
                           )}
@@ -486,32 +612,48 @@ export default function Collections() {
                       )}
 
                       <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleSync(col.id)}
-                          disabled={isRunning}
-                          className="border-primary text-primary hover:bg-primary/10"
-                        >
-                          <RefreshCw className={`w-4 h-4 mr-1 ${isRunning ? "animate-spin" : ""}`} />
-                          {isRunning ? "SYNCING..." : "SYNC"}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => openEdit(col)}
-                          className="text-muted-foreground hover:text-foreground"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(col.id)}
-                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
+                        {isInternal ? (
+                          /* Internal collections: only delete */
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDelete(col.id)}
+                            title="حذف هذا التصنيف الداخلي"
+                            className="text-destructive/60 hover:bg-destructive/10 hover:text-destructive"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        ) : (
+                          /* External collections: sync + edit + delete */
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleSync(col.id)}
+                              disabled={isRunning}
+                              className="border-primary text-primary hover:bg-primary/10"
+                            >
+                              <RefreshCw className={`w-4 h-4 mr-1 ${isRunning ? "animate-spin" : ""}`} />
+                              {isRunning ? "SYNCING..." : "SYNC"}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openEdit(col)}
+                              className="text-muted-foreground hover:text-foreground"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDelete(col.id)}
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
