@@ -8,18 +8,95 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { Database, Plus, Trash2, RefreshCw, Pencil, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { Database, Plus, Trash2, RefreshCw, Pencil, CheckCircle2, XCircle, Loader2, Stethoscope } from "lucide-react";
 import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 
-type FormData = { name: string; connectionString: string; dbName: string; linkField: string };
+// ─── Medical specialties shared list ─────────────────────────────────────────
+function SpecialtySelect({
+  value,
+  onChange,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  className?: string;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className={`text-xs font-mono bg-background border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:border-primary ${className ?? ""}`}
+    >
+      <option value="">— بدون تخصص (عام) —</option>
+      <optgroup label="── طب بشري ──">
+        <option value="general">طب عام</option>
+        <option value="internal">باطنة وأمراض داخلية</option>
+        <option value="surgery">جراحة عامة</option>
+        <option value="pediatrics">أطفال وحديثي الولادة</option>
+        <option value="gynecology">نساء وتوليد</option>
+        <option value="psychiatry">طب نفسي وعصبي</option>
+        <option value="orthopedics">عظام وكسور</option>
+        <option value="cardiology">قلبية وأوعية</option>
+        <option value="neurology">أعصاب</option>
+        <option value="dermatology">جلدية</option>
+        <option value="oncology">أورام وسرطان</option>
+        <option value="urology">مسالك بولية</option>
+        <option value="ent">أنف وأذن وحنجرة</option>
+        <option value="ophthalmology">عيون</option>
+        <option value="emergency">طوارئ وإسعاف</option>
+        <option value="icu">عناية مركزة</option>
+        <option value="anesthesia">تخدير وإنعاش</option>
+      </optgroup>
+      <optgroup label="── أسنان ──">
+        <option value="dentistry">أسنان عام</option>
+        <option value="orthodontics">تقويم الأسنان — Ortho</option>
+        <option value="endodontics">علاج جذور — Endo</option>
+        <option value="prosthodontics">تعويضات أسنان</option>
+        <option value="periodontics">أمراض اللثة — Perio</option>
+        <option value="oral_surgery">جراحة الفم والفكين</option>
+        <option value="pedodontics">أسنان الأطفال</option>
+      </optgroup>
+      <optgroup label="── صيدلة ──">
+        <option value="pharmacy">صيدلة</option>
+        <option value="clinical_pharmacy">صيدلة سريرية</option>
+      </optgroup>
+      <optgroup label="── تمريض ──">
+        <option value="nursing">تمريض</option>
+      </optgroup>
+      <optgroup label="── مختبرات طبية ──">
+        <option value="laboratory">مختبرات طبية</option>
+        <option value="pathology">باثولوجيا وهيستولوجيا</option>
+        <option value="microbiology">ميكروبيولوجيا</option>
+        <option value="biochemistry">كيمياء حيوية</option>
+      </optgroup>
+      <optgroup label="── أشعة تشخيصية ──">
+        <option value="radiology">أشعة تشخيصية</option>
+        <option value="mri">رنين مغناطيسي MRI</option>
+        <option value="ct">مقطعية CT</option>
+        <option value="ultrasound">سونار وموجات</option>
+      </optgroup>
+      <optgroup label="── تخصصات صحية أخرى ──">
+        <option value="physiotherapy">فيزيوثيرابي</option>
+        <option value="optometry">بصريات</option>
+        <option value="medical_coding">ترميز طبي</option>
+        <option value="medical_technician">فني طبي</option>
+        <option value="pct">رعاية مرضى PCT</option>
+        <option value="cssd">تعقيم CSSD</option>
+      </optgroup>
+    </select>
+  );
+}
+
+type FormData = { name: string; connectionString: string; dbName: string; linkField: string; specialty: string };
 
 const EMPTY_FORM: FormData = {
   name: "",
   connectionString: "",
   dbName: "Joining_links",
   linkField: "url",
+  specialty: "",
 };
 
 interface SyncState {
@@ -86,6 +163,20 @@ function CollectionForm({ formData, setFormData, onSave, loading }: CollectionFo
         />
         <p className="text-xs text-muted-foreground">
           إذا كنت غير متأكد اترك <code>url</code> — السيرفر يبحث تلقائياً عن أي حقل يحتوي t.me
+        </p>
+      </div>
+      <div className="space-y-2">
+        <Label className="flex items-center gap-1.5">
+          <Stethoscope className="w-3.5 h-3.5 text-muted-foreground" />
+          التخصص الطبي لهذا المصدر
+        </Label>
+        <SpecialtySelect
+          value={formData.specialty}
+          onChange={v => setFormData(prev => ({ ...prev, specialty: v }))}
+          className="w-full"
+        />
+        <p className="text-xs text-muted-foreground">
+          الروابط المُزامَنة من هذا المصدر ستُوسَم بهذا التخصص — يُستخدم لتوجيهها للحسابات المناسبة
         </p>
       </div>
       <DialogFooter>
@@ -250,9 +341,27 @@ export default function Collections() {
       connectionString: col.connectionString,
       dbName: col.dbName ?? "",
       linkField: col.linkField,
+      specialty: col.specialty ?? "",
     });
     setEditId(col.id);
   };
+
+  const setSpecialtyMutation = useMutation({
+    mutationFn: async ({ id, specialty }: { id: string; specialty: string }) => {
+      const r = await fetch(`/api/collections/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ specialty }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/collections"] });
+      toast({ title: "✅ حُفظ التخصص" });
+    },
+    onError: (e: any) => toast({ title: "خطأ", description: e.message, variant: "destructive" }),
+  });
 
   const handleDelete = (id: string) => {
     if (confirm("حذف هذا المصدر نهائياً؟")) {
@@ -303,6 +412,9 @@ export default function Collections() {
               <TableRow className="border-card-border hover:bg-transparent">
                 <TableHead className="font-mono">NAME</TableHead>
                 <TableHead className="font-mono">DB_INFO</TableHead>
+                <TableHead className="font-mono">
+                  <span className="flex items-center gap-1"><Stethoscope className="w-3.5 h-3.5" />SPECIALTY</span>
+                </TableHead>
                 <TableHead className="font-mono">STATUS</TableHead>
                 <TableHead className="font-mono text-right">LAST_SYNC</TableHead>
                 <TableHead className="font-mono text-right">ACTIONS</TableHead>
@@ -320,6 +432,13 @@ export default function Collections() {
                     <TableCell className="text-muted-foreground">
                       <div>DB: {col.dbName}</div>
                       <div className="text-xs">Field: {col.linkField}</div>
+                    </TableCell>
+                    <TableCell>
+                      <SpecialtySelect
+                        value={(col as any).specialty ?? ""}
+                        onChange={v => setSpecialtyMutation.mutate({ id: col.id, specialty: v })}
+                        className="max-w-[180px]"
+                      />
                     </TableCell>
                     <TableCell>
                       {col.isActive
@@ -400,7 +519,7 @@ export default function Collections() {
               })}
               {cols?.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
                     NO_SOURCES_CONFIGURED
                   </TableCell>
                 </TableRow>

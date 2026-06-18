@@ -214,9 +214,23 @@ async function tick(): Promise<void> {
     const intervalMs = computeActionIntervalMs(usable.length);
     const account = pickAccount(usable);
 
-    // ── Get next link ──
+    // ── Get next link — specialty-aware routing ──
     const targetLinksCol = await collections.targetLinks();
-    let link = await targetLinksCol.findOne({ status: "pending" }, { sort: { createdAt: 1 } });
+
+    // Build specialty filter:
+    // • Account specialty is set (not null/"all") → ONLY pick links for that specialty
+    // • Account specialty is "all" or null → pick untagged/all links (specialty: null or missing)
+    const accSpecialty: string | null = (account as any).specialty ?? null;
+    const isSpecificSpecialty = accSpecialty && accSpecialty !== "all";
+
+    const specialtyFilter = isSpecificSpecialty
+      ? { specialty: accSpecialty }
+      : { $or: [{ specialty: null }, { specialty: { $exists: false } }, { specialty: "all" }] };
+
+    let link = await targetLinksCol.findOne(
+      { status: "pending", ...specialtyFilter },
+      { sort: { createdAt: 1 } }
+    );
 
     if (!link) {
       link = await targetLinksCol.findOne(
@@ -224,6 +238,7 @@ async function tick(): Promise<void> {
           status: "failed",
           retryCount: { $lt: MAX_RETRY_COUNT },
           retryAfter: { $lte: now, $ne: null },
+          ...specialtyFilter,
         },
         { sort: { retryAfter: 1 } }
       );

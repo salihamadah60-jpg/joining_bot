@@ -658,6 +658,23 @@ export default function Accounts() {
     );
   };
 
+  const [customSpecialtyInputs, setCustomSpecialtyInputs] = useState<Record<string, string>>({});
+
+  const saveCustomSpecialty = (id: string) => {
+    const val = customSpecialtyInputs[id]?.trim();
+    if (!val) return;
+    updateAccount.mutate(
+      { id, data: { specialty: val } },
+      {
+        onSuccess: () => {
+          invalidate();
+          setCustomSpecialtyInputs(prev => ({ ...prev, [id]: "" }));
+          toast({ title: "✅ حُفظ التخصص المخصص", description: val });
+        },
+      }
+    );
+  };
+
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [pingingId, setPingingId] = useState<string | null>(null);
   const [pingResults, setPingResults] = useState<Record<string, { ok: boolean; name?: string; error?: string }>>({});
@@ -1087,6 +1104,51 @@ export default function Accounts() {
                               <option value="cssd">تعقيم CSSD</option>
                             </optgroup>
                           </select>
+
+                          {/* Custom specialty — shown if current value is non-standard */}
+                          {(() => {
+                            const PREDEFINED = [
+                              "all","general","internal","surgery","pediatrics","gynecology",
+                              "psychiatry","orthopedics","cardiology","neurology","dermatology",
+                              "oncology","urology","ent","ophthalmology","emergency","icu","anesthesia",
+                              "dentistry","orthodontics","endodontics","prosthodontics","periodontics",
+                              "oral_surgery","pedodontics","pharmacy","clinical_pharmacy","nursing",
+                              "laboratory","pathology","microbiology","biochemistry",
+                              "radiology","mri","ct","ultrasound",
+                              "physiotherapy","optometry","medical_coding","medical_technician","pct","cssd",
+                            ];
+                            const cur = (acc as any).specialty ?? "all";
+                            if (!PREDEFINED.includes(cur)) {
+                              return (
+                                <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                  ✦ {cur}
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
+
+                        {/* Custom specialty input */}
+                        <div className="flex items-center gap-1.5">
+                          <Stethoscope className="w-3 h-3 text-muted-foreground/50" />
+                          <span className="text-xs font-mono text-muted-foreground/70">مخصص:</span>
+                          <Input
+                            placeholder="اكتب تخصصاً..."
+                            value={customSpecialtyInputs[acc.id] ?? ""}
+                            onChange={e => setCustomSpecialtyInputs(prev => ({ ...prev, [acc.id]: e.target.value }))}
+                            onKeyDown={e => { if (e.key === "Enter") saveCustomSpecialty(acc.id); }}
+                            className="text-xs font-mono h-7 w-36 bg-background border-border focus:border-primary"
+                          />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs font-mono px-2 border-primary/40 text-primary hover:bg-primary/10"
+                            onClick={() => saveCustomSpecialty(acc.id)}
+                            disabled={!customSpecialtyInputs[acc.id]?.trim()}
+                          >
+                            حفظ
+                          </Button>
                         </div>
 
                         {/* Create Medical Folder */}

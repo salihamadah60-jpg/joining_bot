@@ -35,6 +35,7 @@ function serializeCollection(c: any) {
     connectionString: c.connectionString,
     dbName: c.dbName,
     linkField: c.linkField,
+    specialty: c.specialty ?? null,
     isActive: c.isActive ?? true,
     lastSyncAt: c.lastSyncAt ? new Date(c.lastSyncAt).toISOString() : null,
     syncedCount: c.totalInQueue ?? c.syncedCount ?? 0,
@@ -73,6 +74,7 @@ router.post("/collections", async (req, res): Promise<void> => {
     connectionString: body.connectionString,
     dbName: body.dbName,
     linkField: body.linkField,
+    specialty: body.specialty ?? null,
     isActive: body.isActive ?? true,
     lastSyncAt: null,
     syncedCount: 0,
@@ -93,6 +95,7 @@ router.put("/collections/:id", async (req, res): Promise<void> => {
   if (body.dbName !== undefined) updates["dbName"] = body.dbName;
   if (body.linkField !== undefined) updates["linkField"] = body.linkField;
   if (body.isActive !== undefined) updates["isActive"] = body.isActive;
+  if (body.specialty !== undefined) updates["specialty"] = body.specialty || null;
   if (Object.keys(updates).length <= 1) { res.status(400).json({ error: "No fields to update" }); return; }
   const col = await collections.mongoCollections();
   const result = await col.findOneAndUpdate(
@@ -214,6 +217,7 @@ async function runSyncBackground(collection: any, id: string): Promise<void> {
     if (validCount > 0) {
       const targetLinksCol = await collections.targetLinks();
       const now = new Date();
+      const linkSpecialty: string | null = collection.specialty ?? null;
       const bulkOps = urls.map((url) => ({
         insertOne: {
           document: {
@@ -224,6 +228,7 @@ async function runSyncBackground(collection: any, id: string): Promise<void> {
             groupTitle: null,
             groupType: null,
             source: name,
+            specialty: linkSpecialty,
             usedByAccountPhone: null,
             retryCount: 0,
             retryAfter: null,

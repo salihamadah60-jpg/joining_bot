@@ -98,6 +98,7 @@ export async function syncOne(
         const targetLinksCol = await collections.targetLinks();
         const now = new Date();
 
+        const linkSpecialty: string | null = collection.specialty ?? null;
         const bulkOps = urls.map((url) => ({
           insertOne: {
             document: {
@@ -108,6 +109,7 @@ export async function syncOne(
               groupTitle: null,
               groupType: null,
               source: collection.name,
+              specialty: linkSpecialty,
               usedByAccountPhone: null,
               retryCount: 0,
               retryAfter: null,

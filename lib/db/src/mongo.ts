@@ -62,6 +62,10 @@ export interface TargetLinkDoc {
   groupTitle: string | null;
   groupType: string | null;
   source: string | null;
+  // specialty: the medical sub-specialty this link belongs to.
+  // null / undefined = untagged (processed only by "all" accounts).
+  // Any other string = processed only by accounts with that specialty.
+  specialty: string | null;
   usedByAccountPhone: string | null;
   retryCount: number;
   retryAfter: Date | null;
