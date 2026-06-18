@@ -530,7 +530,7 @@ export default function Collections() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {isInternal
-                        ? <div className="text-xs text-purple-400/70 italic">داخلي — لا يحتاج اتصال</div>
+                        ? <div className="text-xs text-purple-400/70 italic">داخلي — MongoDB المحلي</div>
                         : (
                           <>
                             <div>DB: {col.dbName}</div>

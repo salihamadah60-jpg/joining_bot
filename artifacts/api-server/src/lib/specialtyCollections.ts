@@ -22,6 +22,23 @@ const ensuredSpecialties = new Set<string>();
  * Ensure an internal collection entry exists for the given specialty.
  * Creates it automatically if not found. Safe to call multiple times.
  */
+function getLocalMongoUrl(): string {
+  return process.env["MONGODB_URL"] ?? "";
+}
+
+function extractLocalDbName(url: string): string {
+  if (!url) return "Joining_links";
+  try {
+    const normalized = url
+      .replace(/^mongodb\+srv:\/\//, "https://")
+      .replace(/^mongodb:\/\//, "https://");
+    const parsed = new URL(normalized);
+    const dbName = parsed.pathname.slice(1).split("?")[0].trim();
+    if (dbName && !dbName.includes(".") && dbName !== "") return dbName;
+  } catch {}
+  return "Joining_links";
+}
+
 export async function ensureSpecialtyCollection(specialty: string): Promise<void> {
   if (!specialty || specialty === "all") return;
   if (ensuredSpecialties.has(specialty)) return;
@@ -35,14 +52,16 @@ export async function ensureSpecialtyCollection(specialty: string): Promise<void
     }
 
     const displayName = SPECIALTY_DISPLAY_NAMES[specialty] ?? specialty;
+    const mongoUrl = getLocalMongoUrl();
+    const dbName = extractLocalDbName(mongoUrl);
     const now = new Date();
 
     await col.insertOne({
       _id: new ObjectId(),
       name: `${displayName}`,
-      connectionString: "",
-      dbName: "",
-      linkField: "",
+      connectionString: mongoUrl,
+      dbName,
+      linkField: "url",
       specialty,
       type: "internal",
       isActive: true,

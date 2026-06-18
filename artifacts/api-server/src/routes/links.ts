@@ -333,20 +333,37 @@ async function runBatchClassification(): Promise<void> {
   const { ensureSpecialtyCollection, incrementSpecialtyCollectionCount } = await import("../lib/specialtyCollections.js");
   const { logger } = await import("../lib/logger.js");
 
-  const col = await collections.targetLinks();
-
-  // Find all joined + invite_request links that have groupTitle but no specialty yet
-  const links = await col.find({
-    status: { $in: ["joined", "invite_request"] },
+  // ── Source 1: JOINED collection — has real groupTitle from Telegram ──────────
+  const joinedCol = await collections.joined();
+  const joinedLinks = await joinedCol.find({
     groupTitle: { $exists: true, $nin: [null, ""] },
     $or: [{ specialty: { $exists: false } }, { specialty: null }],
-  }).toArray();
+  } as any).toArray();
 
-  const total = links.length;
+  // ── Source 2: invite_requests collection — pending/approved with titles ──────
+  const inviteCol = await collections.inviteRequests();
+  const inviteLinks = await inviteCol.find({
+    groupTitle: { $exists: true, $nin: [null, ""] },
+    $or: [{ specialty: { $exists: false } }, { specialty: null }],
+  } as any).toArray();
+
+  // Deduplicate by URL (prefer joined over invite)
+  const urlMap = new Map<string, { title: string; url: string; source: "joined" | "invite"; id: any }>();
+  for (const l of joinedLinks) {
+    urlMap.set(l.url, { title: (l as any).groupTitle, url: l.url, source: "joined", id: l._id });
+  }
+  for (const l of inviteLinks) {
+    if (!urlMap.has(l.url)) {
+      urlMap.set(l.url, { title: (l as any).groupTitle, url: l.url, source: "invite", id: l._id });
+    }
+  }
+
+  const deduped = Array.from(urlMap.values());
+  const total = deduped.length;
 
   eventBus.publish({
     type: "classify_start",
-    message: `🤖 بدء التصنيف الذكي — ${total.toLocaleString()} رابط`,
+    message: `🤖 بدء التصنيف الذكي — ${total.toLocaleString()} مجموعة (${joinedLinks.length} منضمّ + ${inviteLinks.length} دعوات)`,
     total,
     classified: 0,
     timestamp: new Date().toISOString(),
@@ -355,7 +372,7 @@ async function runBatchClassification(): Promise<void> {
   if (total === 0) {
     eventBus.publish({
       type: "classify_complete",
-      message: "✅ لا توجد روابط تحتاج تصنيفاً — الكل مصنَّف مسبقاً",
+      message: "✅ لا توجد مجموعات تحتاج تصنيفاً — الكل مصنَّف مسبقاً",
       total: 0,
       classified: 0,
       timestamp: new Date().toISOString(),
@@ -363,7 +380,7 @@ async function runBatchClassification(): Promise<void> {
     return;
   }
 
-  const items = links.map((l) => ({ title: (l as any).groupTitle, url: l.url }));
+  const items = deduped.map((l) => ({ title: l.title, url: l.url }));
   let classified = 0;
 
   const results = await classifySpecialtyBatched(items, (done, _total) => {
@@ -376,20 +393,40 @@ async function runBatchClassification(): Promise<void> {
     });
   });
 
-  // Apply results and auto-create internal collections
-  for (let i = 0; i < links.length; i++) {
+  // Apply results to JOINED, invite_requests, and TARGET_LINKS (by URL)
+  const targetLinksCol = await collections.targetLinks();
+  const specialtyDeltas = new Map<string, number>();
+
+  for (let i = 0; i < deduped.length; i++) {
     const specialty = results[i];
-    if (specialty) {
-      await col.updateOne({ _id: links[i]!._id }, { $set: { specialty } });
-      await ensureSpecialtyCollection(specialty);
-      await incrementSpecialtyCollectionCount(specialty, 1);
-      classified++;
+    if (!specialty) continue;
+
+    const { url, source, id } = deduped[i]!;
+
+    // Update the source record
+    if (source === "joined") {
+      await joinedCol.updateOne({ _id: id }, { $set: { specialty } } as any);
+    } else {
+      await inviteCol.updateOne({ _id: id }, { $set: { specialty } } as any);
     }
+
+    // Also update TARGET_LINKS for matching URL (if exists)
+    await targetLinksCol.updateMany({ url }, { $set: { specialty } } as any);
+
+    // Track specialty counts for internal collection updates
+    specialtyDeltas.set(specialty, (specialtyDeltas.get(specialty) ?? 0) + 1);
+    classified++;
+  }
+
+  // Ensure internal collections exist and update counts
+  for (const [specialty, delta] of specialtyDeltas) {
+    await ensureSpecialtyCollection(specialty);
+    await incrementSpecialtyCollectionCount(specialty, delta);
   }
 
   eventBus.publish({
     type: "classify_complete",
-    message: `✅ اكتمل التصنيف — ${classified.toLocaleString()} رابط صُنِّف من أصل ${total.toLocaleString()}`,
+    message: `✅ اكتمل التصنيف — ${classified.toLocaleString()} مجموعة صُنِّفت من أصل ${total.toLocaleString()}`,
     total,
     classified,
     timestamp: new Date().toISOString(),

@@ -124,9 +124,19 @@ router.post("/collections/:id/sync", async (req, res): Promise<void> => {
   const col = await collections.mongoCollections();
   const collection = await col.findOne({ _id: new ObjectId(id) });
   if (!collection) { res.status(404).json({ error: "Collection not found" }); return; }
-  // Internal specialty collections have no external MongoDB source — cannot be synced
+  // Internal specialty collections sync from local MongoDB (TARGET_LINKS filtered by specialty)
   if ((collection as any).type === "internal") {
-    res.status(400).json({ error: "Internal specialty collections cannot be synced — they are managed automatically" });
+    res.json({ ok: true, background: true, message: "Sync started in background" });
+    runInternalSyncBackground(collection, id).catch((err) => {
+      logger.error({ err, collectionId: id }, "Internal sync crashed");
+      eventBus.publish({
+        type: "sync_error",
+        collectionId: id,
+        collectionName: collection.name,
+        message: `❌ فشل Sync الداخلي: ${String(err)}`,
+        timestamp: new Date().toISOString(),
+      });
+    });
     return;
   }
 
@@ -300,6 +310,73 @@ async function runSyncBackground(collection: any, id: string): Promise<void> {
     throw err;
   } finally {
     await client.close();
+  }
+}
+
+// ─── Internal collection sync — counts TARGET_LINKS with this specialty ───────
+async function runInternalSyncBackground(collection: any, id: string): Promise<void> {
+  const ts = () => new Date().toISOString();
+  const name = collection.name;
+  const specialty = (collection as any).specialty as string | null;
+
+  eventBus.publish({
+    type: "sync_progress",
+    collectionId: id,
+    collectionName: name,
+    message: `🔍 جاري حساب الروابط المصنَّفة بـ "${name}"...`,
+    total: 0,
+    processed: 0,
+    timestamp: ts(),
+  });
+
+  try {
+    const targetLinksCol = await collections.targetLinks();
+
+    // Count all links in TARGET_LINKS with this specialty
+    const total = await targetLinksCol.countDocuments(
+      specialty ? { specialty } : { $or: [{ specialty: { $exists: false } }, { specialty: null }] }
+    );
+
+    // Also count from JOINED collection
+    const joinedCol = await collections.joined();
+    const joinedCount = await joinedCol.countDocuments(
+      specialty ? { specialty } as any : {}
+    );
+
+    eventBus.publish({
+      type: "sync_progress",
+      collectionId: id,
+      collectionName: name,
+      message: `📊 ${total.toLocaleString()} رابط في الطابور — ${joinedCount.toLocaleString()} منضمّ`,
+      total,
+      processed: total,
+      timestamp: ts(),
+    });
+
+    // Update metadata with fresh count
+    const col = await collections.mongoCollections();
+    await col.updateOne(
+      { _id: collection._id },
+      { $set: { lastSyncAt: new Date(), syncedCount: total, updatedAt: new Date() } }
+    );
+
+    logger.info({ collection: name, specialty, total, joinedCount }, "Internal collection sync complete");
+
+    eventBus.publish({
+      type: "sync_complete",
+      collectionId: id,
+      collectionName: name,
+      synced: 0,
+      duplicates: 0,
+      errors: 0,
+      total,
+      processed: total,
+      message: `✅ ${name}: ${total.toLocaleString()} رابط مصنَّف — ${joinedCount.toLocaleString()} منضمّ`,
+      timestamp: ts(),
+    });
+  } catch (err: any) {
+    logger.error({ err, collection: name }, "Internal sync failed");
+    throw err;
   }
 }
 

@@ -75,6 +75,16 @@ export const SPECIALTY_DISPLAY_NAMES: Record<string, string> = {
 
 const BATCH_SIZE = 20;
 
+// ── Gemini rate limiting ──────────────────────────────────────────────────────
+// Free tier: 15 requests/min. Paid tier: much higher.
+// We add a delay between batches to stay safely under the free-tier limit.
+// 4 seconds between batches = max 15 requests/min.
+const BATCH_DELAY_MS = 4_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 const SYSTEM_PROMPT = `You are an expert medical specialty classifier for Arabic and English Telegram group names.
 
 TASK: Given a numbered list of Telegram group names, classify each one into the correct medical specialty code.
@@ -224,6 +234,10 @@ export async function classifySpecialtyBatched(
 ): Promise<Array<SpecialtyCode>> {
   const results: Array<SpecialtyCode> = [];
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    // Rate limit: wait before each batch (except the first) to stay under Gemini quota
+    if (i > 0) {
+      await sleep(BATCH_DELAY_MS);
+    }
     const chunk = items.slice(i, i + BATCH_SIZE);
     const chunkResults = await classifySpecialtyBatch(chunk);
     results.push(...chunkResults);
