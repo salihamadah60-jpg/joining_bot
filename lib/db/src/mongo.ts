@@ -176,6 +176,8 @@ export interface SyncedDialogDoc {
   url: string | null;
   chatType: string | null;
   syncedAt: Date;
+  folderId?: number | null;
+  folderTitle?: string | null;
 }
 
 export interface LeftGroupDoc {

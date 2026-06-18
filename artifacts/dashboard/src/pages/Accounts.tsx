@@ -55,55 +55,211 @@ function getStatusBadge(status: string, floodWaitUntil?: string | null, hasSessi
   }
 }
 
-// ─── Groups Panel ─────────────────────────────────────────────────────────────
+// ─── Synced Dialogs Panel ─────────────────────────────────────────────────────
 
-interface GroupEntry {
-  id: string;
-  url: string;
-  groupTitle: string | null;
-  groupType: string | null;
-  joinedAt: string;
+interface SyncedDialog {
+  _id: string;
+  accountPhone: string;
+  chatId: string;
+  title: string | null;
+  username: string | null;
+  url: string | null;
+  chatType: string | null;
+  syncedAt: string;
+  folderId?: number | null;
+  folderTitle?: string | null;
 }
 
-function GroupsPanel({ accountId }: { accountId: string }) {
-  const { data: groups = [], isLoading } = useQuery<GroupEntry[]>({
-    queryKey: [`/api/accounts/${accountId}/groups`],
-    queryFn: () => fetch(`/api/accounts/${accountId}/groups`).then((r) => r.json()),
+interface FolderInfo {
+  id: number;
+  title: string;
+  emoticon: string | null;
+  peerCount: number;
+}
+
+function SyncedDialogsPanel({ phone }: { phone: string }) {
+  const [tab, setTab] = useState<"groups" | "channels">("groups");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [folderTitle, setFolderTitle] = useState("");
+  const [folderEmoticon, setFolderEmoticon] = useState("🏥");
+  const { toast } = useToast();
+
+  const { data: dialogsData, isLoading, refetch } = useQuery<{ dialogs: SyncedDialog[] }>({
+    queryKey: [`/api/accounts/${encodeURIComponent(phone)}/synced-dialogs`],
+    queryFn: () => fetch(`/api/accounts/${encodeURIComponent(phone)}/synced-dialogs`).then((r) => r.json()),
+    staleTime: 30_000,
   });
 
-  if (isLoading) return (
-    <p className="text-xs text-muted-foreground py-2 font-mono">⏳ جاري تحميل المجموعات...</p>
-  );
+  const { data: foldersData, refetch: refetchFolders } = useQuery<{ folders: FolderInfo[] }>({
+    queryKey: [`/api/accounts/${encodeURIComponent(phone)}/folders`],
+    queryFn: () => fetch(`/api/accounts/${encodeURIComponent(phone)}/folders`).then((r) => r.json()),
+    staleTime: 60_000,
+  });
 
-  if (groups.length === 0) return (
-    <p className="text-xs text-muted-foreground py-2 font-mono">لا توجد مجموعات مسجلة لهذا الحساب في قاعدة البيانات</p>
-  );
+  const dialogs = dialogsData?.dialogs ?? [];
+  const folders = foldersData?.folders ?? [];
+
+  const isChannel = (d: SyncedDialog) => d.chatType === "channel" || d.chatType === "broadcast";
+  const groups = dialogs.filter((d) => !isChannel(d));
+  const channels = dialogs.filter((d) => isChannel(d));
+  const displayed = tab === "groups" ? groups : channels;
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else if (next.size < 100) next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => setSelected(new Set(displayed.slice(0, 100).map((d) => d._id)));
+  const clearSel = () => setSelected(new Set());
+
+  const createFolderMutation = useMutation({
+    mutationFn: async () => {
+      if (!folderTitle.trim()) throw new Error("اسم المجلد مطلوب");
+      const r = await fetch(`/api/accounts/${encodeURIComponent(phone)}/folders/from-ids`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: folderTitle.trim(), dialogIds: [...selected], emoticon: folderEmoticon }),
+      });
+      if (!r.ok) { const t = await r.json(); throw new Error(t?.error ?? t?.message ?? "فشل"); }
+      return r.json() as Promise<{ ok: boolean; folderId: number; added: number; total: number; skipped: number }>;
+    },
+    onSuccess: (data) => {
+      toast({ title: "✅ مجلد أُنشئ", description: `مجلد #${data.folderId} — أُضيف: ${data.added} | تعذّر: ${data.skipped}` });
+      clearSel();
+      setFolderTitle("");
+      refetch();
+      refetchFolders();
+    },
+    onError: (e: any) => toast({ title: "❌ فشل إنشاء المجلد", description: e?.message, variant: "destructive" }),
+  });
 
   return (
-    <div className="max-h-56 overflow-y-auto space-y-1.5 font-mono">
-      <p className="text-xs text-muted-foreground pb-1">
-        <span className="text-primary font-bold">{groups.length}</span> مجموعة / قناة
-      </p>
-      {groups.map((g) => (
-        <div key={g.id} className="flex items-center gap-2 text-xs">
-          <a
-            href={g.url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-primary hover:underline flex items-center gap-1 truncate max-w-xs"
-            title={g.url}
-          >
-            {g.groupTitle ?? g.url}
-            <ExternalLink className="w-2.5 h-2.5 flex-shrink-0 opacity-60" />
-          </a>
-          {g.groupType && (
-            <Badge variant="outline" className="text-xs py-0 px-1 font-mono">{g.groupType}</Badge>
-          )}
-          <span className="text-muted-foreground flex-shrink-0">
-            {formatDistanceToNow(new Date(g.joinedAt), { addSuffix: true, locale: ar })}
-          </span>
+    <div className="space-y-2 font-mono">
+      {/* Existing Telegram folders */}
+      {folders.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pb-1 border-b border-border">
+          <span className="text-[10px] text-muted-foreground self-center">مجلدات تيليجرام:</span>
+          {folders.map((f) => (
+            <Badge key={f.id} variant="outline" className="text-[10px] py-0 border-emerald-500/40 text-emerald-400">
+              {f.emoticon} {f.title}
+              <span className="opacity-50 ml-1">({f.peerCount})</span>
+            </Badge>
+          ))}
         </div>
-      ))}
+      )}
+
+      {/* Tabs + select controls */}
+      <div className="flex items-center gap-2 text-xs">
+        <button
+          onClick={() => { setTab("groups"); clearSel(); }}
+          className={`px-2 py-0.5 rounded border transition-colors ${tab === "groups" ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:border-muted-foreground/50"}`}
+        >
+          مجموعات ({groups.length})
+        </button>
+        <button
+          onClick={() => { setTab("channels"); clearSel(); }}
+          className={`px-2 py-0.5 rounded border transition-colors ${tab === "channels" ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:border-muted-foreground/50"}`}
+        >
+          قنوات ({channels.length})
+        </button>
+        {displayed.length > 0 && (
+          <button onClick={selectAll} className="text-[10px] text-primary hover:underline mr-auto">
+            تحديد الكل (حتى 100)
+          </button>
+        )}
+        {selected.size > 0 && (
+          <button onClick={clearSel} className="text-[10px] text-muted-foreground hover:underline">
+            إلغاء ({selected.size})
+          </button>
+        )}
+      </div>
+
+      {/* Dialog list */}
+      <div className="max-h-48 overflow-y-auto space-y-0.5 border border-border rounded-md p-1.5 bg-background">
+        {isLoading && (
+          <p className="text-xs text-muted-foreground py-3 text-center">⏳ جاري التحميل...</p>
+        )}
+        {!isLoading && displayed.length === 0 && (
+          <p className="text-xs text-muted-foreground py-3 text-center">
+            لا {tab === "groups" ? "مجموعات" : "قنوات"} مزامَنة — اضغط SYNC أولاً
+          </p>
+        )}
+        {displayed.map((d) => (
+          <div
+            key={d._id}
+            onClick={() => toggleSelect(d._id)}
+            className={`flex items-center gap-2 text-xs rounded px-1.5 py-1 cursor-pointer transition-colors select-none ${
+              selected.has(d._id)
+                ? "bg-primary/10 border border-primary/20"
+                : "border border-transparent hover:bg-muted/50"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={selected.has(d._id)}
+              onChange={() => toggleSelect(d._id)}
+              onClick={(e) => e.stopPropagation()}
+              className="w-3 h-3 accent-primary flex-shrink-0"
+            />
+            <span className="flex-1 truncate">{d.title ?? d.username ?? d.chatId}</span>
+            {d.username && (
+              <a
+                href={`https://t.me/${d.username}`}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="w-2.5 h-2.5 text-muted-foreground/40 hover:text-primary flex-shrink-0" />
+              </a>
+            )}
+            {d.folderId && (
+              <Badge variant="outline" className="text-[10px] py-0 px-1 border-emerald-500/30 text-emerald-400 flex-shrink-0">
+                {d.folderTitle ?? `#${d.folderId}`}
+              </Badge>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Folder creation — appears only when items are selected */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-2 pt-1.5 border-t border-border flex-wrap">
+          <Input
+            value={folderTitle}
+            onChange={(e) => setFolderTitle(e.target.value)}
+            placeholder="اسم المجلد الجديد..."
+            className="h-7 text-xs font-mono bg-background flex-1 min-w-[120px]"
+            onKeyDown={(e) => { if (e.key === "Enter" && folderTitle.trim()) createFolderMutation.mutate(); }}
+          />
+          <select
+            value={folderEmoticon}
+            onChange={(e) => setFolderEmoticon(e.target.value)}
+            className="h-7 text-sm bg-background border border-border rounded px-1 flex-shrink-0"
+            title="رمز المجلد"
+          >
+            {["🏥","💊","🧬","🔬","🩺","📚","🦷","❤️","🧠","🫀","🦴","🧪","💉","🩻"].map((em) => (
+              <option key={em} value={em}>{em}</option>
+            ))}
+          </select>
+          <Button
+            size="sm"
+            className="h-7 text-xs font-mono gap-1 px-2.5 flex-shrink-0"
+            onClick={() => createFolderMutation.mutate()}
+            disabled={createFolderMutation.isPending || !folderTitle.trim()}
+          >
+            {createFolderMutation.isPending ? (
+              <RefreshCw className="w-3 h-3 animate-spin" />
+            ) : (
+              <FolderPlus className="w-3 h-3" />
+            )}
+            {createFolderMutation.isPending ? "..." : `إنشاء مجلد (${selected.size})`}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1244,13 +1400,13 @@ export default function Accounts() {
                         </Button>
                       </div>
 
-                      {/* Groups panel */}
+                      {/* Synced dialogs panel */}
                       <div className="border border-border rounded-lg p-3 bg-background">
                         <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
                           <List className="w-3.5 h-3.5 text-primary" />
-                          المجموعات المنضم إليها — {acc.phone}
+                          الحوارات المزامنة — {acc.phone}
                         </p>
-                        <GroupsPanel accountId={acc.id} />
+                        <SyncedDialogsPanel phone={acc.phone} />
                       </div>
                     </TableCell>
                   </TableRow>

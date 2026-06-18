@@ -50,10 +50,21 @@ router.get("/collections", async (req, res): Promise<void> => {
   const docs = await col.find({}).sort({ createdAt: 1 }).toArray();
   const targetLinksCol = await collections.targetLinks();
 
-  // Count actual links in queue per collection source
+  // Count actual links in queue per collection source/specialty
   const withCounts = await Promise.all(
     docs.map(async (doc) => {
-      const totalInQueue = await targetLinksCol.countDocuments({ source: doc.name });
+      let totalInQueue: number;
+      if ((doc as any).type === "internal") {
+        // Internal collections represent TARGET_LINKS filtered by specialty — count by specialty
+        const specialty = (doc as any).specialty as string | null;
+        totalInQueue = await targetLinksCol.countDocuments(
+          specialty
+            ? { specialty }
+            : { $or: [{ specialty: { $exists: false } }, { specialty: null }] }
+        );
+      } else {
+        totalInQueue = await targetLinksCol.countDocuments({ source: doc.name });
+      }
       return { ...doc, totalInQueue };
     })
   );

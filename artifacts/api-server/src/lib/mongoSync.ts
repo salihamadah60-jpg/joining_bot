@@ -32,6 +32,8 @@ export async function runSyncAll(): Promise<void> {
   if (mongoCollections.length === 0) return;
   logger.info({ count: mongoCollections.length }, "Auto-syncing MongoDB collections");
   for (const collection of mongoCollections) {
+    // Internal specialty collections don't have an external MongoDB connection — skip them here
+    if ((collection as any).type === "internal") continue;
     await syncOne(collection);
   }
 }
