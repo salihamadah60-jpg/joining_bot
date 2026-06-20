@@ -95,6 +95,28 @@ async function checkLearnedPatterns(
   return null;
 }
 
+// ─── Word-boundary keyword matching ──────────────────────────────────────────
+/**
+ * Test if a keyword matches in text using word boundaries (Unicode-aware).
+ * Prevents short words like "ME" from matching inside "medicine" or "prometric".
+ * Works for both Latin and Arabic text.
+ */
+function matchesWordBoundary(text: string, keyword: string): boolean {
+  // Escape regex special chars in the keyword
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  try {
+    // Unicode-aware word boundary: not preceded or followed by a word char (Latin or Arabic)
+    const regex = new RegExp(
+      `(?<![\\w\\u0600-\\u06FF])${escaped}(?![\\w\\u0600-\\u06FF])`,
+      "i"
+    );
+    return regex.test(text);
+  } catch {
+    // Fallback: substring match if regex fails (e.g. complex Unicode edge case)
+    return text.toLowerCase().includes(keyword.toLowerCase());
+  }
+}
+
 // ─── Custom blocked keywords cache ───────────────────────────────────────────
 // Loaded from MongoDB settings (key: "custom_blocked_keywords") with a 60s TTL.
 // This lets admins add/remove keywords from the UI without restarting the server.
@@ -143,14 +165,16 @@ export async function isRelevantGroupAsync(
   }
 
   // 0b. Custom blocked keywords (user-defined via Settings UI)
+  // Uses word-boundary matching to avoid false positives:
+  // e.g. "ME" should NOT block "medicine", "prometric", "MRCP", "SMLE", "USMLE"
   const customBlocked = await getCustomBlockedKeywords();
   if (customBlocked.length > 0) {
     const combined = (
       (title ?? "") + " " + (description ?? "") + " " + sampleMessages.join(" ")
-    ).toLowerCase();
-    const matchedKw = customBlocked.find((kw) => combined.includes(kw.toLowerCase()));
+    );
+    const matchedKw = customBlocked.find((kw) => matchesWordBoundary(combined, kw));
     if (matchedKw) {
-      logger.info({ title, keyword: matchedKw }, "Group blocked by custom keyword — skipping");
+      logger.info({ title, keyword: matchedKw }, "Group blocked by custom keyword (word-boundary) — skipping");
       return false;
     }
   }

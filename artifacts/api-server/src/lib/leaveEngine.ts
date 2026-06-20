@@ -524,6 +524,19 @@ function scheduleLeaveTick(delayMs: number): void {
 }
 
 async function leaveTick(): Promise<void> {
+  // ── Guard: auto-leave must be explicitly enabled by the user ─────────────────
+  try {
+    const { getSettings } = await import("@workspace/db");
+    const kv = await getSettings();
+    if (kv["auto_leave_enabled"] !== "true") {
+      logger.debug("Auto-leave is DISABLED — skipping cleanup tick (enable from Settings → Auto-Leave)");
+      return;
+    }
+  } catch {
+    logger.debug("Could not read auto_leave_enabled — skipping cleanup as safe default");
+    return;
+  }
+
   const accountsCol = await collections.accounts();
   const limitAccounts = await accountsCol.find({ status: "channels_limit" }).toArray();
 

@@ -59,6 +59,8 @@ router.put("/settings", async (req, res): Promise<void> => {
     "ai_filter_enabled",
     "mongo_backup_url",
     "mongo_backup_db",
+    "auto_leave_enabled",
+    "custom_blocked_keywords",
   ]);
 
   const updates: { key: string; value: string }[] = [];

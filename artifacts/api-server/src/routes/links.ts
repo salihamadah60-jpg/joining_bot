@@ -5,6 +5,30 @@ import { eventBus } from "../lib/eventBus.js";
 
 const router: IRouter = Router();
 
+/**
+ * Normalize a t.me URL by stripping message IDs.
+ * https://t.me/channel/12345  →  https://t.me/channel
+ * https://t.me/+HASH          →  kept as-is (private invite)
+ * https://t.me/joinchat/HASH  →  kept as-is (old private invite)
+ */
+function normalizeTelegramUrl(url: string): string {
+  try {
+    let normalized = url.trim();
+    if (/^t\.me\//i.test(normalized)) normalized = "https://" + normalized;
+    if (!/^https?:\/\//i.test(normalized)) return url;
+    const u = new URL(normalized);
+    if (!u.hostname.endsWith("t.me")) return url;
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (!parts.length) return url;
+    const first = parts[0]!;
+    if (first.startsWith("+")) return `https://t.me/${first}`;
+    if (first.toLowerCase() === "joinchat" && parts[1]) return `https://t.me/joinchat/${parts[1]}`;
+    return `https://t.me/${first}`;
+  } catch {
+    return url;
+  }
+}
+
 /** Extract all valid Telegram URLs from a raw text blob. */
 function extractTelegramUrls(rawText: string): string[] {
   const pattern = /(?:https?:\/\/t\.me\/[^\s"'<>\u0600-\u06FF]+|t\.me\/[^\s"'<>\u0600-\u06FF]+|@[a-zA-Z][a-zA-Z0-9_]{3,})/gi;
@@ -13,7 +37,7 @@ function extractTelegramUrls(rawText: string): string[] {
     let url = u.trim().replace(/[,;.،؛]+$/, "");
     if (url.startsWith("@")) return `https://t.me/${url.slice(1)}`;
     if (!url.startsWith("http")) return `https://${url}`;
-    return url;
+    return normalizeTelegramUrl(url);
   });
   const seen = new Set<string>();
   return normalised.filter((u) => {
@@ -71,9 +95,10 @@ router.post("/links", async (req, res): Promise<void> => {
   }
   const col = await collections.targetLinks();
   try {
+    const normalizedUrl = normalizeTelegramUrl(body.url.trim());
     const result = await col.insertOne({
       _id: new ObjectId(),
-      url: body.url,
+      url: normalizedUrl,
       status: "pending",
       failReason: null,
       groupTitle: null,
@@ -313,9 +338,26 @@ router.post("/links/reuse-joined", async (req, res): Promise<void> => {
   res.json({ added, reset, skipped, total: joined.length });
 });
 
+// ─── Requeue skipped links ────────────────────────────────────────────────────
+// POST /api/links/requeue-skipped
+// Resets all TARGET_LINKS with status "skipped" back to "pending" so the bot
+// will retry them with the updated keyword filter / AI classifier.
+router.post("/links/requeue-skipped", async (req, res): Promise<void> => {
+  const col = await collections.targetLinks();
+  const result = await col.updateMany(
+    { status: "skipped" },
+    { $set: { status: "pending", failReason: null, retryCount: 0, retryAfter: null, processedAt: null } }
+  );
+  res.json({
+    ok: true,
+    updated: result.modifiedCount,
+    message: `تمت إعادة ${result.modifiedCount.toLocaleString()} رابط مُتجاهَل إلى قائمة الانتظار`,
+  });
+});
+
 // ─── AI Batch Specialty Classification ───────────────────────────────────────
 // POST /api/links/classify-batch
-// Classifies ALL joined + invite_request links that have a groupTitle but no specialty.
+// Classifies joined + invite_request + synced_dialogs + left_groups + skipped links.
 // Returns immediately; runs in background; emits SSE events for progress.
 router.post("/links/classify-batch", async (req, res): Promise<void> => {
   res.json({ ok: true, background: true, message: "AI classification started in background" });
@@ -333,22 +375,23 @@ async function runBatchClassification(): Promise<void> {
   const { ensureSpecialtyCollection, incrementSpecialtyCollectionCount } = await import("../lib/specialtyCollections.js");
   const { logger } = await import("../lib/logger.js");
 
-  // ── Source 1: JOINED collection — has real groupTitle from Telegram ──────────
+  // ── Source 1: JOINED collection ───────────────────────────────────────────────
   const joinedCol = await collections.joined();
   const joinedLinks = await joinedCol.find({
     groupTitle: { $exists: true, $nin: [null, ""] },
     $or: [{ specialty: { $exists: false } }, { specialty: null }],
   } as any).toArray();
 
-  // ── Source 2: invite_requests collection — pending/approved with titles ──────
+  // ── Source 2: invite_requests collection ─────────────────────────────────────
   const inviteCol = await collections.inviteRequests();
   const inviteLinks = await inviteCol.find({
     groupTitle: { $exists: true, $nin: [null, ""] },
     $or: [{ specialty: { $exists: false } }, { specialty: null }],
   } as any).toArray();
 
-  // Deduplicate by URL (prefer joined over invite)
-  const urlMap = new Map<string, { title: string; url: string; source: "joined" | "invite"; id: any }>();
+  type SourceType = "joined" | "invite" | "synced_dialog" | "left_group" | "skipped_link";
+  const urlMap = new Map<string, { title: string; url: string; source: SourceType; id: any }>();
+
   for (const l of joinedLinks) {
     urlMap.set(l.url, { title: (l as any).groupTitle, url: l.url, source: "joined", id: l._id });
   }
@@ -358,12 +401,58 @@ async function runBatchClassification(): Promise<void> {
     }
   }
 
+  // ── Source 3: synced_dialogs — joined channels/groups in accounts ─────────────
+  const dialogsCol = await collections.syncedDialogs();
+  const dialogRecords = await (dialogsCol as any).find({
+    title: { $exists: true, $nin: [null, ""] },
+    $or: [{ specialty: { $exists: false } }, { specialty: null }],
+  }).toArray();
+  for (const d of dialogRecords) {
+    const key = d.url || `tg://id/${d.chatId}`;
+    if (!urlMap.has(key)) {
+      urlMap.set(key, { title: d.title, url: key, source: "synced_dialog", id: d._id });
+    }
+  }
+
+  // ── Source 4: left_groups — groups we've left ─────────────────────────────────
+  const leftCol = await collections.leftGroups();
+  const leftRecords = await (leftCol as any).find({
+    title: { $exists: true, $nin: [null, ""] },
+    $or: [{ specialty: { $exists: false } }, { specialty: null }],
+  }).toArray();
+  for (const l of leftRecords) {
+    if (l.url && !urlMap.has(l.url)) {
+      urlMap.set(l.url, { title: l.title, url: l.url, source: "left_group", id: l._id });
+    }
+  }
+
+  // ── Source 5: TARGET_LINKS skipped with groupTitle ────────────────────────────
+  const targetLinksCol = await collections.targetLinks();
+  const skippedRecords = await targetLinksCol.find({
+    status: "skipped",
+    groupTitle: { $exists: true, $nin: [null, ""] },
+    $or: [{ specialty: { $exists: false } }, { specialty: null }],
+  } as any).toArray();
+  for (const s of skippedRecords) {
+    if (!urlMap.has(s.url)) {
+      urlMap.set(s.url, { title: (s as any).groupTitle, url: s.url, source: "skipped_link", id: s._id });
+    }
+  }
+
   const deduped = Array.from(urlMap.values());
   const total = deduped.length;
 
+  const sourceBreakdown = [
+    `${joinedLinks.length} منضمّ`,
+    `${inviteLinks.length} دعوات`,
+    `${dialogRecords.length} مزامنة`,
+    `${leftRecords.length} مغادَر`,
+    `${skippedRecords.length} مُتجاهَل`,
+  ].join(" + ");
+
   eventBus.publish({
     type: "classify_start",
-    message: `🤖 بدء التصنيف الذكي — ${total.toLocaleString()} مجموعة (${joinedLinks.length} منضمّ + ${inviteLinks.length} دعوات)`,
+    message: `🤖 بدء التصنيف الذكي — ${total.toLocaleString()} مجموعة (${sourceBreakdown})`,
     total,
     classified: 0,
     timestamp: new Date().toISOString(),
@@ -393,8 +482,6 @@ async function runBatchClassification(): Promise<void> {
     });
   });
 
-  // Apply results to JOINED, invite_requests, and TARGET_LINKS (by URL)
-  const targetLinksCol = await collections.targetLinks();
   const specialtyDeltas = new Map<string, number>();
 
   for (let i = 0; i < deduped.length; i++) {
@@ -403,22 +490,28 @@ async function runBatchClassification(): Promise<void> {
 
     const { url, source, id } = deduped[i]!;
 
-    // Update the source record
+    // Update the source collection record
     if (source === "joined") {
       await joinedCol.updateOne({ _id: id }, { $set: { specialty } } as any);
-    } else {
+    } else if (source === "invite") {
       await inviteCol.updateOne({ _id: id }, { $set: { specialty } } as any);
+    } else if (source === "synced_dialog") {
+      await (dialogsCol as any).updateOne({ _id: id }, { $set: { specialty } });
+    } else if (source === "left_group") {
+      await (leftCol as any).updateOne({ _id: id }, { $set: { specialty } });
+    } else if (source === "skipped_link") {
+      await targetLinksCol.updateOne({ _id: id }, { $set: { specialty } } as any);
     }
 
-    // Also update TARGET_LINKS for matching URL (if exists)
-    await targetLinksCol.updateMany({ url }, { $set: { specialty } } as any);
+    // Also sync specialty to TARGET_LINKS by URL (skip virtual tg:// keys)
+    if (!url.startsWith("tg://")) {
+      await targetLinksCol.updateMany({ url }, { $set: { specialty } } as any);
+    }
 
-    // Track specialty counts for internal collection updates
     specialtyDeltas.set(specialty, (specialtyDeltas.get(specialty) ?? 0) + 1);
     classified++;
   }
 
-  // Ensure internal collections exist and update counts
   for (const [specialty, delta] of specialtyDeltas) {
     await ensureSpecialtyCollection(specialty);
     await incrementSpecialtyCollectionCount(specialty, delta);

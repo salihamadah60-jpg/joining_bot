@@ -2,12 +2,14 @@ import { useGetBotStatus, useGetBotActivity, useStartBot, useStopBot, useGetAcco
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Play, Square, Activity, Users, Link as LinkIcon, AlertTriangle } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { Play, Square, Activity, Users, Link as LinkIcon, AlertTriangle, RotateCcw, ShieldAlert, ShieldCheck } from "lucide-react";
+import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const { data: botStatus, isLoading: loadingStatus } = useGetBotStatus({
     query: { refetchInterval: 5000 } as any
   });
@@ -23,6 +25,53 @@ export default function Dashboard() {
 
   const startBot = useStartBot();
   const stopBot = useStopBot();
+
+  // ── Auto-leave toggle ──────────────────────────────────────────────────────
+  const { data: settingsData, refetch: refetchSettings } = useQuery({
+    queryKey: ["/api/settings"],
+    queryFn: async () => {
+      const r = await fetch("/api/settings");
+      if (!r.ok) throw new Error("Failed to load settings");
+      return r.json() as Promise<Record<string, string>>;
+    },
+    refetchInterval: 10000,
+  });
+
+  const autoLeaveEnabled = settingsData?.["auto_leave_enabled"] === "true";
+
+  const toggleAutoLeave = useMutation({
+    mutationFn: async (enable: boolean) => {
+      const r = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auto_leave_enabled: enable ? "true" : "false" }),
+      });
+      if (!r.ok) throw new Error("Failed to update setting");
+      return r.json();
+    },
+    onSuccess: (_, enable) => {
+      refetchSettings();
+      toast({
+        title: enable ? "⚠️ تم تفعيل المغادرة التلقائية" : "✅ تم إيقاف المغادرة التلقائية",
+        description: enable
+          ? "البوت سيغادر المجموعات غير الطبية تلقائياً"
+          : "البوت لن يغادر أي مجموعة تلقائياً",
+      });
+    },
+  });
+
+  // ── Requeue skipped links ──────────────────────────────────────────────────
+  const requeueSkipped = useMutation({
+    mutationFn: async () => {
+      const r = await fetch("/api/links/requeue-skipped", { method: "POST" });
+      if (!r.ok) throw new Error("Failed to requeue");
+      return r.json() as Promise<{ updated: number; message: string }>;
+    },
+    onSuccess: (data) => {
+      toast({ title: `♻️ ${data.message}` });
+      queryClient.invalidateQueries({ queryKey: ["/api/bot/status"] });
+    },
+  });
 
   const handleStart = () => {
     startBot.mutate(undefined, {
@@ -105,6 +154,70 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold font-mono text-destructive">{botStatus?.totalFailedToday || 0}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ── Auto-leave control + Quick actions ─────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card className={`border-2 ${autoLeaveEnabled ? "border-destructive/50 bg-destructive/5" : "border-primary/30 bg-primary/5"}`}>
+          <CardHeader className="pb-3">
+            <CardTitle className="font-mono text-sm flex items-center gap-2">
+              {autoLeaveEnabled
+                ? <ShieldAlert className="w-4 h-4 text-destructive" />
+                : <ShieldCheck className="w-4 h-4 text-primary" />}
+              AUTO_LEAVE_CONTROL
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-mono">
+                  المغادرة التلقائية:
+                  <span className={`ml-2 font-bold ${autoLeaveEnabled ? "text-destructive" : "text-primary"}`}>
+                    {autoLeaveEnabled ? "مُفعَّلة ⚠️" : "مُعطَّلة ✅"}
+                  </span>
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {autoLeaveEnabled
+                    ? "البوت يغادر تلقائياً المجموعات غير الطبية"
+                    : "البوت لن يغادر أي مجموعة — آمن تماماً"}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant={autoLeaveEnabled ? "destructive" : "outline"}
+                className="font-mono text-xs"
+                onClick={() => toggleAutoLeave.mutate(!autoLeaveEnabled)}
+                disabled={toggleAutoLeave.isPending}
+              >
+                {autoLeaveEnabled ? "إيقاف" : "تفعيل"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="font-mono text-sm flex items-center gap-2">
+              <RotateCcw className="w-4 h-4 text-amber-400" />
+              REQUEUE_SKIPPED_LINKS
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              إعادة إدراج الروابط المُتجاهَلة (skipped) إلى قائمة الانتظار للمراجعة مع الفلتر المُحدَّث
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="font-mono text-xs gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+              onClick={() => requeueSkipped.mutate()}
+              disabled={requeueSkipped.isPending}
+            >
+              <RotateCcw className="w-3 h-3" />
+              {requeueSkipped.isPending ? "جارٍ الإعادة..." : "إعادة إدراج الروابط المُتجاهَلة"}
+            </Button>
           </CardContent>
         </Card>
       </div>

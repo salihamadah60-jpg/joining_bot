@@ -24,6 +24,7 @@ export const ALL_SPECIALTY_CODES = [
   "radiology", "mri", "ct", "ultrasound",
   "physiotherapy", "optometry", "medical_coding", "medical_technician", "pct", "cssd",
   "exams",
+  "channels_only",
 ] as const;
 
 export type SpecialtyCode = (typeof ALL_SPECIALTY_CODES)[number] | null;
@@ -71,6 +72,7 @@ export const SPECIALTY_DISPLAY_NAMES: Record<string, string> = {
   pct: "رعاية مرضى PCT",
   cssd: "تعقيم CSSD",
   exams: "اختبارات وشهادات طبية",
+  channels_only: "قنوات طبية فقط",
 };
 
 const BATCH_SIZE = 20;

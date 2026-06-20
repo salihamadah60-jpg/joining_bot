@@ -221,7 +221,8 @@ async function tick(): Promise<void> {
     // • Account specialty is set (not null/"all") → ONLY pick links for that specialty
     // • Account specialty is "all" or null → pick untagged/all links (specialty: null or missing)
     const accSpecialty: string | null = (account as any).specialty ?? null;
-    const isSpecificSpecialty = accSpecialty && accSpecialty !== "all";
+    // channels_only accounts join everything medical (like "all") — post-join filter below handles non-channels
+    const isSpecificSpecialty = accSpecialty && accSpecialty !== "all" && accSpecialty !== "channels_only";
 
     const specialtyFilter = isSpecificSpecialty
       ? { specialty: accSpecialty }
@@ -561,12 +562,25 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
     await logJoinJob(account.phone, link.url, "success");
 
     // ── 12. Account Specialization: auto-leave off-topic groups ──────────────
-    if (relevant === false && account.specialty && account.specialty !== "all") {
+    if (relevant === false && account.specialty && account.specialty !== "all" && account.specialty !== "channels_only") {
       addToLeaveQueue(
         account.phone,
         [{ url: link.url, chatId: chatId ? String(chatId) : undefined, title: groupTitle ?? undefined, chatType: groupType ?? undefined }],
         `auto-specialty:${account.specialty}`
       ).catch((e) => logger.warn({ phone: account.phone, err: e }, "Specialty auto-queue failed"));
+    }
+
+    // ── 13. channels_only: queue non-channel entities for cleanup ────────────
+    if (account.specialty === "channels_only" && groupType) {
+      const isChannel = /channel|broadcast/i.test(groupType);
+      if (!isChannel) {
+        logger.info({ phone: account.phone, url: link.url, groupType }, "channels_only: joined a group (not a channel) — queuing for cleanup");
+        addToLeaveQueue(
+          account.phone,
+          [{ url: link.url, chatId: chatId ? String(chatId) : undefined, title: groupTitle ?? undefined, chatType: groupType ?? undefined }],
+          "channels_only:not_a_channel"
+        ).catch((e) => logger.warn({ phone: account.phone, err: e }, "channels_only auto-queue failed"));
+      }
     }
 
     return relevant === true;
