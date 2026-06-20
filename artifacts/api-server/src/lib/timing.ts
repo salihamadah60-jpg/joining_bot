@@ -110,41 +110,73 @@ function getDailyJitter(): number {
 /**
  * P2-3: Is the current time within the BLACKOUT (inactive) window?
  *
- * @param activeStartHour - Hour of day (0–23) when bot becomes active (default 8 = 8am)
+ * @param activeStartHour - Hour of day (0–23, in LOCAL user time) when bot becomes active
  * @param activeHoursCount - How many hours the bot is active per day (default 18)
  * @param applyJitter - Apply daily ±1h random jitter to start time
+ * @param utcOffsetHours - User's timezone offset from UTC (e.g., 3 for Saudi Arabia UTC+3)
  */
 export function isBlackoutHourConfigurable(
   activeStartHour = BLACKOUT_END_HOUR,
   activeHoursCount = ACTIVE_HOURS,
-  applyJitter = true
+  applyJitter = true,
+  utcOffsetHours = 0
 ): boolean {
   const jitter = applyJitter ? getDailyJitter() : 0;
   const start = ((activeStartHour + jitter) % 24 + 24) % 24;
   const end = (start + activeHoursCount) % 24;
-  const hour = new Date().getHours();
+
+  // Use UTC time + offset to get local user time regardless of server timezone
+  const utcHour = new Date().getUTCHours();
+  const utcMinute = new Date().getUTCMinutes();
+  // fractional hour so boundaries are more precise
+  const localHour = ((utcHour + utcOffsetHours) % 24 + 24) % 24;
+  // Use fractional to handle the current minute (avoid false blackout at the boundary minute)
+  const localFractional = (localHour + utcMinute / 60);
+  const hour = Math.floor(localFractional);
 
   if (end > start) {
-    // e.g. active 8→2: in blackout if hour < 8 or hour >= 26%24=2
+    // e.g. active 8→26(=2 next day): in blackout if hour < 8 or hour >= 2
     return hour < start || hour >= end;
   } else {
-    // Wraps midnight: e.g. active 22→16, blackout 16→22
+    // Wraps midnight: e.g. active 20→14, blackout 14→20
     return hour >= end && hour < start;
   }
 }
 
 /**
  * P2-3: Milliseconds until the active window starts (end of blackout).
+ * @param utcOffsetHours - User's timezone offset from UTC (e.g., 3 for Saudi Arabia)
  */
 export function msUntilActiveStartConfigurable(
   activeStartHour = BLACKOUT_END_HOUR,
-  applyJitter = true
+  applyJitter = true,
+  utcOffsetHours = 0
 ): number {
   const jitter = applyJitter ? getDailyJitter() : 0;
   const start = ((activeStartHour + jitter) % 24 + 24) % 24;
+
+  // Compute next start time in UTC
   const now = new Date();
+  const utcHour = now.getUTCHours();
+  const localHour = ((utcHour + utcOffsetHours) % 24 + 24) % 24;
+
+  // Compute local midnight in UTC ms
+  const localMidnightUTC = new Date(now);
+  localMidnightUTC.setUTCHours(
+    ((0 - utcOffsetHours) % 24 + 24) % 24,
+    0, 0, 0
+  );
+  // If that midnight is already past, go to tomorrow's midnight
+  if (localMidnightUTC.getTime() > now.getTime()) {
+    // Use as-is (it's today's local midnight in UTC)
+  }
+
+  // Start time in UTC = local start - offset
+  const startUTCHour = ((start - utcOffsetHours) % 24 + 24) % 24;
   const next = new Date(now);
-  next.setHours(start, 0, 0, 0);
-  if (next <= now) next.setDate(next.getDate() + 1);
+  next.setUTCHours(startUTCHour, 0, 0, 0);
+  if (next.getTime() <= now.getTime()) {
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
   return next.getTime() - now.getTime();
 }

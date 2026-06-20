@@ -149,6 +149,8 @@ async function tick(): Promise<void> {
     const settingsKv = await getSettings();
     const activeHoursCount = Number(settingsKv["active_hours_count"] ?? 18);
     const sleepHours = 24 - activeHoursCount;
+    // UTC offset for correct timezone handling (server runs UTC, user may be UTC+3)
+    const utcOffsetHours = Number(settingsKv["utc_offset_hours"] ?? 3);
 
     // Derive active start from blackout_start_hour (user sets stop time, start is auto)
     // Fallback to legacy active_start_hour if blackout_start_hour not set yet
@@ -165,17 +167,23 @@ async function tick(): Promise<void> {
       (settingsKv["ai_filter_enabled"] === undefined && !!process.env["GEMINI_API_KEY"]);
     setAiFilterEnabled(aiEnabled);
 
-    if (isBlackoutHourConfigurable(activeStartHour, activeHoursCount)) {
+    if (isBlackoutHourConfigurable(activeStartHour, activeHoursCount, true, utcOffsetHours)) {
       // Check force-active override (user clicked "تشغيل فوراً")
       const forceUntil = state.forceActiveUntil ? new Date(state.forceActiveUntil) : null;
       if (forceUntil && forceUntil > new Date()) {
         // Override active — skip blackout this cycle
         logger.info({ forceUntil }, "Force-active override — skipping blackout");
       } else {
-        const waitMs = msUntilActiveStartConfigurable(activeStartHour);
+        const waitMs = msUntilActiveStartConfigurable(activeStartHour, true, utcOffsetHours);
         const blackoutStart = (activeStartHour + activeHoursCount) % 24;
-        logger.info({ waitMinutes: Math.ceil(waitMs / 60_000), activeStartHour, blackoutStart }, "Blackout window — pausing");
-        await logActivity("bot_stopped", `⏸ وقت الراحة — ينتهي الساعة ${activeStartHour}:00`);
+        // Show local time in message for user clarity
+        const localNowH = ((new Date().getUTCHours() + utcOffsetHours) % 24 + 24) % 24;
+        const localNowM = new Date().getUTCMinutes().toString().padStart(2, "0");
+        logger.info(
+          { waitMinutes: Math.ceil(waitMs / 60_000), activeStartHour, blackoutStart, localNow: `${localNowH}:${localNowM}`, utcOffsetHours },
+          "Blackout window — pausing"
+        );
+        await logActivity("bot_stopped", `⏸ وقت الراحة (${localNowH}:${localNowM}) — ينتهي الساعة ${activeStartHour}:00`);
         scheduleNext(waitMs);
         return;
       }
@@ -218,14 +226,38 @@ async function tick(): Promise<void> {
     const targetLinksCol = await collections.targetLinks();
 
     // Build specialty filter:
-    // • Account specialty is set (not null/"all") → ONLY pick links for that specialty
+    // • Account specialty is set (not null/"all") → pick links for that specialty AND any legacy
+    //   sub-specialty codes that map to it (e.g. "internal", "surgery" → "general").
     // • Account specialty is "all" or null → pick untagged/all links (specialty: null or missing)
     const accSpecialty: string | null = (account as any).specialty ?? null;
     // channels_only accounts join everything medical (like "all") — post-join filter below handles non-channels
     const isSpecificSpecialty = accSpecialty && accSpecialty !== "all" && accSpecialty !== "channels_only";
 
+    // Legacy sub-specialty codes that map to the 9 simplified parent categories
+    const SPECIALTY_PARENT_MAP: Record<string, string> = {
+      internal: "general", surgery: "general", pediatrics: "general",
+      gynecology: "general", psychiatry: "general", orthopedics: "general",
+      cardiology: "general", neurology: "general", dermatology: "general",
+      oncology: "general", urology: "general", ent: "general",
+      ophthalmology: "general", emergency: "general", icu: "general",
+      radiology: "general", mri: "general", ct: "general", ultrasound: "general",
+      physiotherapy: "general", optometry: "general", medical_coding: "general",
+      medical_technician: "general", pct: "general", cssd: "general",
+      orthodontics: "dentistry", endodontics: "dentistry", prosthodontics: "dentistry",
+      periodontics: "dentistry", oral_surgery: "dentistry", pedodontics: "dentistry",
+      clinical_pharmacy: "pharmacy",
+      pathology: "laboratory", microbiology: "laboratory", biochemistry: "laboratory",
+    };
+
+    // Find all legacy codes that belong to this parent specialty
+    const legacyCodes = isSpecificSpecialty
+      ? Object.entries(SPECIALTY_PARENT_MAP)
+          .filter(([_, parent]) => parent === accSpecialty)
+          .map(([code]) => code)
+      : [];
+
     const specialtyFilter = isSpecificSpecialty
-      ? { specialty: accSpecialty }
+      ? { specialty: { $in: [accSpecialty, ...legacyCodes] } }
       : { $or: [{ specialty: null }, { specialty: { $exists: false } }, { specialty: "all" }] };
 
     let link = await targetLinksCol.findOne(

@@ -62,8 +62,8 @@ async function fetchDialogs(phone: string): Promise<Dialog[]> {
   return r.json();
 }
 
-async function fetchLeaveHistory(accountPhone?: string): Promise<{ total: number; items: LeftGroup[] }> {
-  const params = new URLSearchParams({ limit: "200" });
+async function fetchLeaveHistory(accountPhone?: string, offset = 0, limit = 500): Promise<{ total: number; items: LeftGroup[] }> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (accountPhone) params.set("accountPhone", accountPhone);
   const r = await fetch(`/api/leave/history?${params}`);
   if (!r.ok) throw new Error(await r.text());
@@ -752,26 +752,66 @@ function LeaveHistoryTab() {
   const qc = useQueryClient();
   const [filterPhone, setFilterPhone] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [allItems, setAllItems] = useState<LeftGroup[]>([]);
+  const [loadedCount, setLoadedCount] = useState(500);
+  const [totalCount, setTotalCount] = useState(0);
 
   const { data: accountsData } = useListAccounts();
   const accounts = (accountsData as any) ?? [];
 
+  const PAGE_SIZE = 500;
+
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ["/api/leave/history", filterPhone],
-    queryFn: () => fetchLeaveHistory(filterPhone === "all" ? undefined : filterPhone),
+    queryKey: ["/api/leave/history", filterPhone, loadedCount],
+    queryFn: () => fetchLeaveHistory(filterPhone === "all" ? undefined : filterPhone, 0, loadedCount),
     refetchInterval: 30_000,
   });
 
-  const items: LeftGroup[] = data?.items ?? [];
+  // When data changes, update allItems and totalCount
+  useState(() => {
+    if (data) {
+      setAllItems(data.items ?? []);
+      setTotalCount(data.total ?? 0);
+    }
+  });
+  const items: LeftGroup[] = data?.items ?? allItems;
+  const total = data?.total ?? totalCount;
+  const hasMore = items.length < total;
+
+  const loadMore = () => {
+    setLoadedCount((prev) => prev + PAGE_SIZE);
+  };
 
   const rejoinMutation = useMutation({
     mutationFn: (urls: string[]) => rejoinUrls(urls),
-    onSuccess: (data) => {
+    onSuccess: (result) => {
       toast({
         title: "تمت إعادة الإضافة للطابور",
-        description: `أُضيف: ${data.added} | موجود مسبقاً: ${data.skipped}`,
+        description: `أُضيف: ${result.added} | موجود مسبقاً: ${result.skipped}`,
       });
       setSelectedIds(new Set());
+      qc.invalidateQueries({ queryKey: ["/api/links"] });
+    },
+    onError: (e: any) =>
+      toast({ title: "خطأ", description: e.message, variant: "destructive" }),
+  });
+
+  const requeueAllMutation = useMutation({
+    mutationFn: async () => {
+      const allWithUrl = items.filter((i) => !!i.url);
+      const r = await fetch("/api/links/rejoin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls: allWithUrl.map((i) => i.url) }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    onSuccess: (result) => {
+      toast({
+        title: "✅ إعادة إدراج المغادرات",
+        description: `أُضيف: ${result.added} | موجود: ${result.skipped}`,
+      });
       qc.invalidateQueries({ queryKey: ["/api/links"] });
     },
     onError: (e: any) =>
@@ -796,7 +836,7 @@ function LeaveHistoryTab() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Select value={filterPhone} onValueChange={setFilterPhone}>
+        <Select value={filterPhone} onValueChange={(v) => { setFilterPhone(v); setLoadedCount(500); }}>
           <SelectTrigger className="w-64 font-mono text-sm border-card-border bg-card/40">
             <SelectValue />
           </SelectTrigger>
@@ -824,8 +864,24 @@ function LeaveHistoryTab() {
         </Button>
 
         <span className="text-xs font-mono text-muted-foreground">
-          {data?.total ?? 0} إجمالي المغادرات
+          {items.length.toLocaleString()} / {total.toLocaleString()} مغادرة
         </span>
+
+        {/* Requeue ALL with URL */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => requeueAllMutation.mutate()}
+          disabled={requeueAllMutation.isPending || items.filter((i) => !!i.url).length === 0}
+          className="font-mono gap-2 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+        >
+          {requeueAllMutation.isPending ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <RotateCcw className="w-3.5 h-3.5" />
+          )}
+          إعادة إدراج الكل ({items.filter((i) => !!i.url).length})
+        </Button>
 
         {rejoinableItems.length > 0 && (
           <Button
@@ -833,14 +889,14 @@ function LeaveHistoryTab() {
             size="sm"
             onClick={() => rejoinMutation.mutate(rejoinableItems.map((i) => i.url))}
             disabled={rejoinMutation.isPending}
-            className="font-mono gap-2 mr-auto border-primary/40 text-primary hover:bg-primary/10"
+            className="font-mono gap-2 border-primary/40 text-primary hover:bg-primary/10"
           >
             {rejoinMutation.isPending ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <RotateCcw className="w-3.5 h-3.5" />
             )}
-            إعادة الانضمام ({rejoinableItems.length})
+            إعادة المحدد ({rejoinableItems.length})
           </Button>
         )}
       </div>
@@ -945,6 +1001,22 @@ function LeaveHistoryTab() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Load More button */}
+      {hasMore && (
+        <div className="flex justify-center pt-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadMore}
+            disabled={isLoading}
+            className="font-mono gap-2 border-card-border text-muted-foreground hover:text-foreground"
+          >
+            {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            تحميل {Math.min(PAGE_SIZE, total - items.length)} من {(total - items.length).toLocaleString()} متبقٍ
+          </Button>
+        </div>
+      )}
 
       {selectedIds.size > 0 && rejoinableItems.length < selectedIds.size && (
         <p className="text-xs text-muted-foreground font-mono">

@@ -1,86 +1,63 @@
 /**
- * AI SPECIALTY CLASSIFIER
+ * AI SPECIALTY CLASSIFIER — 9 Simplified Categories
  *
- * Uses Google Gemini to classify Telegram group titles into medical specialties.
+ * Uses Google Gemini to classify Telegram group titles into ONE of 9 medical specialties.
  * Works in batches of 20 items per API call for efficiency.
  *
- * Returns:
- *   specialty code  e.g. "dentistry", "nursing", "radiology"
- *   "exams"         for medical exam / licensing / board exam groups
- *   null            for non-medical groups
+ * Returns: specialty code (one of 9) or null for non-medical groups.
  */
 
 import { logger } from "./logger.js";
 
 export const ALL_SPECIALTY_CODES = [
-  "general", "internal", "surgery", "pediatrics", "gynecology", "psychiatry",
-  "orthopedics", "cardiology", "neurology", "dermatology", "oncology", "urology",
-  "ent", "ophthalmology", "emergency", "icu", "anesthesia",
-  "dentistry", "orthodontics", "endodontics", "prosthodontics", "periodontics",
-  "oral_surgery", "pedodontics",
-  "pharmacy", "clinical_pharmacy",
-  "nursing",
-  "laboratory", "pathology", "microbiology", "biochemistry",
-  "radiology", "mri", "ct", "ultrasound",
-  "physiotherapy", "optometry", "medical_coding", "medical_technician", "pct", "cssd",
-  "exams",
-  "channels_only",
+  "general",      // طب عام (includes all clinical medicine sub-specialties)
+  "dentistry",    // طب أسنان (includes all dental sub-specialties)
+  "nursing",      // تمريض
+  "anesthesia",   // تخدير وإنعاش
+  "laboratory",   // مختبرات طبية (includes pathology, micro, biochem)
+  "pharmacy",     // صيدلة (includes clinical pharmacy)
+  "exams",        // ابتعاث واختبارات طبية (SMLE, Prometric, board exams, scholarships)
+  "channels_only", // مُستخدم للتوجيه فقط — ليس ناتج AI
 ] as const;
 
 export type SpecialtyCode = (typeof ALL_SPECIALTY_CODES)[number] | null;
 
 export const SPECIALTY_DISPLAY_NAMES: Record<string, string> = {
   general: "طب عام",
-  internal: "باطنة وأمراض داخلية",
-  surgery: "جراحة عامة",
-  pediatrics: "أطفال وحديثي الولادة",
-  gynecology: "نساء وتوليد",
-  psychiatry: "طب نفسي وعصبي",
-  orthopedics: "عظام وكسور",
-  cardiology: "قلبية وأوعية",
-  neurology: "أعصاب",
-  dermatology: "جلدية",
-  oncology: "أورام وسرطان",
-  urology: "مسالك بولية",
-  ent: "أنف وأذن وحنجرة",
-  ophthalmology: "عيون",
-  emergency: "طوارئ وإسعاف",
-  icu: "عناية مركزة",
-  anesthesia: "تخدير وإنعاش",
-  dentistry: "أسنان عام",
-  orthodontics: "تقويم الأسنان",
-  endodontics: "علاج جذور",
-  prosthodontics: "تعويضات أسنان",
-  periodontics: "أمراض اللثة",
-  oral_surgery: "جراحة الفم والفكين",
-  pedodontics: "أسنان الأطفال",
-  pharmacy: "صيدلة",
-  clinical_pharmacy: "صيدلة سريرية",
+  dentistry: "طب أسنان",
   nursing: "تمريض",
+  anesthesia: "تخدير وإنعاش",
   laboratory: "مختبرات طبية",
-  pathology: "باثولوجيا",
-  microbiology: "ميكروبيولوجيا",
-  biochemistry: "كيمياء حيوية",
-  radiology: "أشعة تشخيصية",
-  mri: "رنين مغناطيسي MRI",
-  ct: "مقطعية CT",
-  ultrasound: "سونار وموجات",
-  physiotherapy: "فيزيوثيرابي",
-  optometry: "بصريات",
-  medical_coding: "ترميز طبي",
-  medical_technician: "فني طبي",
-  pct: "رعاية مرضى PCT",
-  cssd: "تعقيم CSSD",
-  exams: "اختبارات وشهادات طبية",
+  pharmacy: "صيدلة",
+  exams: "ابتعاث واختبارات",
   channels_only: "قنوات طبية فقط",
+};
+
+/**
+ * Maps old detailed specialty codes → new simplified parent code.
+ * Used to migrate existing DB records and for routing logic.
+ */
+export const SPECIALTY_PARENT_MAP: Record<string, string> = {
+  // طب عام (general)
+  internal: "general", surgery: "general", pediatrics: "general",
+  gynecology: "general", psychiatry: "general", orthopedics: "general",
+  cardiology: "general", neurology: "general", dermatology: "general",
+  oncology: "general", urology: "general", ent: "general",
+  ophthalmology: "general", emergency: "general", icu: "general",
+  radiology: "general", mri: "general", ct: "general", ultrasound: "general",
+  physiotherapy: "general", optometry: "general", medical_coding: "general",
+  medical_technician: "general", pct: "general", cssd: "general",
+  // طب أسنان (dentistry)
+  orthodontics: "dentistry", endodontics: "dentistry", prosthodontics: "dentistry",
+  periodontics: "dentistry", oral_surgery: "dentistry", pedodontics: "dentistry",
+  // صيدلة (pharmacy)
+  clinical_pharmacy: "pharmacy",
+  // مختبرات (laboratory)
+  pathology: "laboratory", microbiology: "laboratory", biochemistry: "laboratory",
 };
 
 const BATCH_SIZE = 20;
 
-// ── Gemini rate limiting ──────────────────────────────────────────────────────
-// Free tier: 15 requests/min. Paid tier: much higher.
-// We add a delay between batches to stay safely under the free-tier limit.
-// 4 seconds between batches = max 15 requests/min.
 const BATCH_DELAY_MS = 4_000;
 
 function sleep(ms: number): Promise<void> {
@@ -89,64 +66,32 @@ function sleep(ms: number): Promise<void> {
 
 const SYSTEM_PROMPT = `You are an expert medical specialty classifier for Arabic and English Telegram group names.
 
-TASK: Given a numbered list of Telegram group names, classify each one into the correct medical specialty code.
+TASK: Given a numbered list of Telegram group names, classify each into exactly ONE of these 9 specialty codes.
 
-VALID SPECIALTY CODES:
-general, internal, surgery, pediatrics, gynecology, psychiatry, orthopedics, cardiology, neurology, dermatology, oncology, urology, ent, ophthalmology, emergency, icu, anesthesia, dentistry, orthodontics, endodontics, prosthodontics, periodontics, oral_surgery, pedodontics, pharmacy, clinical_pharmacy, nursing, laboratory, pathology, microbiology, biochemistry, radiology, mri, ct, ultrasound, physiotherapy, optometry, medical_coding, medical_technician, pct, cssd, exams
+━━━ THE 9 VALID CODES ━━━
+general    → All clinical medicine (طب عام, باطنة, جراحة, أطفال, قلب, عظام, أعصاب, نساء, جلدية, عيون, أنف, طوارئ, أشعة, أورام, بولية, ICU, طب نفسي, فيزيوثيرابي, بصريات, ترميز طبي, فني, PCT, CSSD, تشخيص, التصوير الطبي — كل ما هو طب سريري ليس أسنان ولا تمريض ولا تخدير ولا مختبرات ولا صيدلة)
+dentistry  → طب الأسنان بجميع تخصصاته (تقويم، جذور، لثة، تعويضات، جراحة الفم، أسنان أطفال)
+nursing    → تمريض، ممرض، ممرضة، nurse, midwife, caring, ICU nurse
+anesthesia → تخدير، إنعاش، anesthesia, sedation, pain management, pain clinic
+laboratory → مختبرات، تحاليل، هيماتولوجيا، باثولوجيا، ميكروبيولوجيا، كيمياء حيوية، CBC، serology, lab, clinical lab
+pharmacy   → صيدلة، دواء، عقاقير، صيدلاني، pharmacology, clinical pharmacy, dispensing
+exams      → اختبارات ترخيص طبي وابتعاث: Prometric, USMLE, SMLE, SCFHS, DHA, MOH, HAAD, OSCE, MRCS, FRCR, بورد, زمالة, ابتعاث, ترخيص, امتحان, اختبار, مرخصين, تصنيف SCFHS, سكرين
 
-SPECIAL CODE "exams": Medical licensing, board exams, assessment (Prometric, USMLE, SMLE, SCFHS, DHA, MOH, HAAD, OSCE, MRCS, FRCR, اختبار, زمالة, ابتعاث, بورد, ليسانس, امتحان, سكرين, مرخصين, تصنيف)
+RETURN null → إذا المجموعة لا علاقة لها بالطب أو الرعاية الصحية (crypto, trading, business, religion, cooking, sports, news, engineering, accounting, general chat, إلخ)
 
-RETURN null: if the group has NOTHING to do with medicine or healthcare (crypto, business, religion, news, cooking, sports, engineering, accounting, etc.)
+━━━ قواعد مهمة ━━━
+1. تخدير = anesthesia (ليس general — لها تخصص مستقل)
+2. مختبرات/تحاليل = laboratory (ليس general)
+3. صيدلة = pharmacy
+4. تمريض = nursing
+5. إذا كانت المجموعة عن "طب" بشكل عام بدون تخصص محدد → general
+6. مجموعات الطلاب الطبيين بدون تخصص → general
+7. مجموعات عن SMLE/Prometric/ترخيص/ابتعاث/زمالة → exams
+8. مجموعات الأسنان بكل أنواعها (تقويم، جذور، لثة...) → dentistry
+9. إذا ذُكر crypto/trading/استثمار مع الطب → null (مجموعة إعلانية)
+10. صورة شخصية/دردشة/منوعات = null
 
-CLASSIFICATION GUIDE (Analyze MEANING not just keywords):
-- dentistry: أسنان، سن، أضراس، تقويم، لثة، جذور، تيجان، تركيبات، حشوات، طب الفم، زراعة، implant, prostho, endo, ortho, perio, oral, fissure
-- orthodontics: تقويم الأسنان specifically, ortho, braces, aligner
-- endodontics: علاج الجذور, endo, root canal, pulp
-- prosthodontics: تعويضات أسنان, crowns, bridges, dentures, prostho
-- periodontics: اللثة, perio, gum disease, periodontitis
-- oral_surgery: جراحة الفم والفكين, oral surgery, jaw, extraction
-- pedodontics: أسنان الأطفال, pedodontics, pediatric dentistry
-- pharmacy: صيدلة، دواء، عقاقير، صيدلي، pharmacology, clinical pharmacy, dispensing, drug
-- nursing: تمريض، ممرض، ممرضة، nurse, ICU nurse, midwife, caring
-- laboratory: مختبر، تحاليل، هيماتولوجي، CBC، serology, microbiology, pathology, biochemistry, lab
-- radiology: أشعة، رنين، سونار، مقطعية، CT, MRI, ultrasound, imaging, nuclear medicine, interventional
-- mri: رنين مغناطيسي specifically, MRI technician, MRI scan
-- ct: مقطعية CT specifically, CT scan technician
-- ultrasound: سونار, ultrasound, echo specifically
-- physiotherapy: فيزيوثيرابي، علاج طبيعي، تأهيل، physiotherapy, rehabilitation, sports medicine therapy
-- emergency: طوارئ، إسعاف، emergency, trauma, EMS
-- icu: عناية مركزة، ICU, critical care, PICU, NICU (intensive care)
-- cardiology: قلب، أوعية، قلبية، cardiac, ECG, catheter, stent, arrhythmia
-- neurology: أعصاب، نيورو، stroke, epilepsy, EEG, neurosurgery (if neurology context)
-- psychiatry: نفسي، نفسية، طب نفسي، psychiatry, psychology (medical context), mental health
-- surgery: جراحة عامة، جراح، laparoscopy, OR, operating room, surgical
-- orthopedics: عظام، كسور، مفاصل، bone, fracture, spine, arthroplasty
-- pediatrics: أطفال، طفل، pediatrics, neonatology, NICU (pediatric context)
-- gynecology: نساء، توليد، حمل، obstetrics, gynecology, maternity, IVF
-- dermatology: جلدية، جلد، skin, dermatology, cosmetology (medical), acne, psoriasis
-- oncology: أورام، سرطان، oncology, chemotherapy, cancer, tumor
-- ent: أنف، أذن، حنجرة، ENT, otolaryngology, hearing, cochlear
-- ophthalmology: عيون، بصر، eye, retina, cataract, glaucoma, ophthalmology
-- anesthesia: تخدير، إنعاش، anesthesia, analgesia, sedation, pain management
-- urology: مسالك بولية, urology, kidney stone, prostate, bladder
-- general: mixed medical, general medicine students, general health groups without specific specialty
-- optometry: بصريات, optometry, glasses, contact lens, refraction (NOT ophthalmology surgery)
-- medical_coding: ترميز طبي, ICD, CPT, medical coding, billing
-- medical_technician: فني طبي general, paramedic support technician
-- pct: رعاية مرضى, patient care technician, PCT, CNA
-- cssd: تعقيم, CSSD, sterilization, autoclave
-
-IMPORTANT RULES:
-1. Analyze FULL MEANING and CONTEXT of the group name
-2. Arabic medical groups often have informal or combined names - understand them intelligently
-3. If group is specifically about ONE subspecialty (e.g., orthodontics), use the subspecialty code, NOT the parent (dentistry)
-4. Medical student groups without specific specialty → use "general"
-5. If BOTH medical AND investment/crypto mentioned → return null (advertising group)
-6. Groups like "مجموعة اطباء" (doctors group) without specialty → "general"
-7. "Healthcare jobs" or "medical employment" without specialty → "general"
-8. If ambiguous between two subspecialties, pick the MORE SPECIFIC one
-
-OUTPUT FORMAT: Return ONLY a valid JSON array, no explanation:
+OUTPUT FORMAT: Return ONLY a valid JSON array, no explanation, no markdown:
 [{"i":0,"s":"specialty_code_or_null"}, {"i":1,"s":"dentistry"}, {"i":2,"s":null}]`;
 
 async function loadGemini(): Promise<any | null> {
@@ -173,13 +118,16 @@ export async function classifySpecialty(
 
 /**
  * Classify MULTIPLE groups in one Gemini API call (up to 20 per batch).
- * Returns an array of specialty codes with the same length as input.
+ * Returns an array of specialty codes (9 simplified) with the same length as input.
  */
 export async function classifySpecialtyBatch(
   items: Array<{ title?: string | null; url?: string | null }>
 ): Promise<Array<SpecialtyCode>> {
   const apiKey = process.env["GEMINI_API_KEY"];
-  if (!apiKey) return items.map(() => null);
+  if (!apiKey) {
+    logger.warn("GEMINI_API_KEY not set — specialty classifier disabled");
+    return items.map(() => null);
+  }
 
   const GenAI = await loadGemini();
   if (!GenAI) {
@@ -199,26 +147,39 @@ export async function classifySpecialtyBatch(
       return `${i}: ${name}`;
     });
 
-    const prompt = `${SYSTEM_PROMPT}\n\nClassify these groups:\n${inputs.join("\n")}`;
+    const prompt = `${SYSTEM_PROMPT}\n\nClassify these ${items.length} groups:\n${inputs.join("\n")}`;
 
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim();
 
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
-      logger.warn({ text: text.substring(0, 300) }, "AI specialty: no JSON in response");
+      logger.warn({ text: text.substring(0, 500) }, "AI specialty: no JSON array in response");
       return items.map(() => null);
     }
 
     const parsed: Array<{ i: number; s: string | null }> = JSON.parse(jsonMatch[0]);
     const resultMap = new Map<number, SpecialtyCode>();
+
+    const VALID_CODES = new Set<string>(ALL_SPECIALTY_CODES.filter(c => c !== "channels_only"));
+
     for (const entry of parsed) {
-      const code = entry.s;
-      if (code === null || (ALL_SPECIALTY_CODES as readonly string[]).includes(code)) {
-        resultMap.set(entry.i, code as SpecialtyCode);
+      if (typeof entry.i !== "number") continue;
+      const raw = entry.s;
+      if (raw === null) {
+        resultMap.set(entry.i, null);
+      } else if (VALID_CODES.has(raw)) {
+        resultMap.set(entry.i, raw as SpecialtyCode);
+      } else if (SPECIALTY_PARENT_MAP[raw]) {
+        // Downgrade old detailed code to parent simplified code
+        resultMap.set(entry.i, SPECIALTY_PARENT_MAP[raw] as SpecialtyCode);
+      } else {
+        logger.warn({ code: raw }, "AI returned unknown specialty code — treating as general medical");
+        resultMap.set(entry.i, "general");
       }
     }
 
+    logger.debug({ count: items.length, classified: resultMap.size }, "AI batch classify complete");
     return items.map((_, i) => resultMap.get(i) ?? null);
   } catch (err) {
     logger.warn({ err }, "AI specialty batch classify failed");
@@ -236,7 +197,6 @@ export async function classifySpecialtyBatched(
 ): Promise<Array<SpecialtyCode>> {
   const results: Array<SpecialtyCode> = [];
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
-    // Rate limit: wait before each batch (except the first) to stay under Gemini quota
     if (i > 0) {
       await sleep(BATCH_DELAY_MS);
     }

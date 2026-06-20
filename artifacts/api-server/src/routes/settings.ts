@@ -55,6 +55,8 @@ router.put("/settings", async (req, res): Promise<void> => {
     "auto_sync_interval_minutes",
     "active_start_hour",
     "active_hours_count",
+    "blackout_start_hour",
+    "utc_offset_hours",
     "default_daily_limit",
     "ai_filter_enabled",
     "mongo_backup_url",

@@ -389,7 +389,7 @@ async function runBatchClassification(): Promise<void> {
     $or: [{ specialty: { $exists: false } }, { specialty: null }],
   } as any).toArray();
 
-  type SourceType = "joined" | "invite" | "synced_dialog" | "left_group" | "skipped_link";
+  type SourceType = "joined" | "invite" | "left_group" | "skipped_link";
   const urlMap = new Map<string, { title: string; url: string; source: SourceType; id: any }>();
 
   for (const l of joinedLinks) {
@@ -401,20 +401,7 @@ async function runBatchClassification(): Promise<void> {
     }
   }
 
-  // ── Source 3: synced_dialogs — joined channels/groups in accounts ─────────────
-  const dialogsCol = await collections.syncedDialogs();
-  const dialogRecords = await (dialogsCol as any).find({
-    title: { $exists: true, $nin: [null, ""] },
-    $or: [{ specialty: { $exists: false } }, { specialty: null }],
-  }).toArray();
-  for (const d of dialogRecords) {
-    const key = d.url || `tg://id/${d.chatId}`;
-    if (!urlMap.has(key)) {
-      urlMap.set(key, { title: d.title, url: key, source: "synced_dialog", id: d._id });
-    }
-  }
-
-  // ── Source 4: left_groups — groups we've left ─────────────────────────────────
+  // ── Source 3: left_groups — groups we've left ─────────────────────────────────
   const leftCol = await collections.leftGroups();
   const leftRecords = await (leftCol as any).find({
     title: { $exists: true, $nin: [null, ""] },
@@ -426,7 +413,7 @@ async function runBatchClassification(): Promise<void> {
     }
   }
 
-  // ── Source 5: TARGET_LINKS skipped with groupTitle ────────────────────────────
+  // ── Source 4: TARGET_LINKS skipped with groupTitle ────────────────────────────
   const targetLinksCol = await collections.targetLinks();
   const skippedRecords = await targetLinksCol.find({
     status: "skipped",
@@ -445,7 +432,6 @@ async function runBatchClassification(): Promise<void> {
   const sourceBreakdown = [
     `${joinedLinks.length} منضمّ`,
     `${inviteLinks.length} دعوات`,
-    `${dialogRecords.length} مزامنة`,
     `${leftRecords.length} مغادَر`,
     `${skippedRecords.length} مُتجاهَل`,
   ].join(" + ");
@@ -495,8 +481,6 @@ async function runBatchClassification(): Promise<void> {
       await joinedCol.updateOne({ _id: id }, { $set: { specialty } } as any);
     } else if (source === "invite") {
       await inviteCol.updateOne({ _id: id }, { $set: { specialty } } as any);
-    } else if (source === "synced_dialog") {
-      await (dialogsCol as any).updateOne({ _id: id }, { $set: { specialty } });
     } else if (source === "left_group") {
       await (leftCol as any).updateOne({ _id: id }, { $set: { specialty } });
     } else if (source === "skipped_link") {
@@ -527,6 +511,197 @@ async function runBatchClassification(): Promise<void> {
 
   logger.info({ total, classified }, "Batch specialty classification complete");
 }
+
+// ── POST /api/links/set-specialty — manually assign specialty to a link ─────
+// Body: { url: string, specialty: string | null }
+router.post("/links/set-specialty", async (req, res): Promise<void> => {
+  try {
+    const { url, specialty } = req.body as { url?: string; specialty?: string | null };
+    if (!url) { res.status(400).json({ error: "url is required" }); return; }
+
+    const VALID = ["general","dentistry","nursing","anesthesia","laboratory","pharmacy","exams","channels_only"];
+    if (specialty !== null && specialty !== undefined && !VALID.includes(specialty)) {
+      res.status(400).json({ error: `Invalid specialty. Must be one of: ${VALID.join(", ")} or null` });
+      return;
+    }
+
+    const col = await collections.targetLinks();
+    const joinedCol = await collections.joined();
+
+    const newVal = specialty ?? null;
+    await col.updateMany({ url }, { $set: { specialty: newVal } } as any);
+    await (joinedCol as any).updateMany({ url }, { $set: { specialty: newVal } });
+
+    const { logger } = await import("../lib/logger.js");
+    logger.info({ url, specialty: newVal }, "Manual specialty assignment");
+
+    res.json({ ok: true, url, specialty: newVal });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/links/requeue-preview — preview ALL-sources requeue candidates ─
+// Shows what would be added back to the pending queue from all historical sources.
+router.get("/links/requeue-preview", async (req, res): Promise<void> => {
+  try {
+    const { specialty } = req.query as { specialty?: string };
+
+    const joinedCol = await collections.joined();
+    const leftCol = await collections.leftGroups();
+    const targetLinksCol = await collections.targetLinks();
+
+    // Build specialty filter if provided
+    const specFilter: Record<string, any> = {};
+    if (specialty) specFilter["specialty"] = specialty;
+
+    // Source 1: left_groups — previously left (most important for requeue)
+    const leftDocs = await (leftCol as any).find({
+      url: { $exists: true, $nin: [null, ""] },
+      ...specFilter,
+    }).sort({ leftAt: -1 }).toArray();
+
+    // Source 2: JOINED with specialty (so user can see them and re-add)
+    const joinedDocs = await (joinedCol as any).find({
+      url: { $exists: true, $nin: [null, ""] },
+      ...specFilter,
+    }).sort({ joinedAt: -1 }).limit(2000).toArray();
+
+    // Source 3: TARGET_LINKS skipped
+    const skippedFilter: Record<string, any> = { status: "skipped" };
+    if (specialty) skippedFilter["specialty"] = specialty;
+    const skippedDocs = await targetLinksCol.find(skippedFilter as any).toArray();
+
+    // Deduplicate by URL — left_groups take priority
+    const urlMap = new Map<string, {
+      url: string; title: string | null; specialty: string | null; source: string;
+    }>();
+
+    for (const d of leftDocs) {
+      urlMap.set(d.url, { url: d.url, title: d.title ?? null, specialty: d.specialty ?? null, source: "left_groups" });
+    }
+    for (const d of joinedDocs) {
+      if (!urlMap.has(d.url)) {
+        urlMap.set(d.url, { url: d.url, title: d.groupTitle ?? d.title ?? null, specialty: d.specialty ?? null, source: "joined" });
+      }
+    }
+    for (const d of skippedDocs) {
+      if (!urlMap.has(d.url)) {
+        urlMap.set(d.url, { url: d.url, title: (d as any).groupTitle ?? null, specialty: (d as any).specialty ?? null, source: "skipped" });
+      }
+    }
+
+    // Exclude URLs already in TARGET_LINKS as pending/joined
+    const existingActive = await targetLinksCol.find(
+      { status: { $in: ["pending", "joined"] } } as any
+    ).project({ url: 1 }).toArray();
+    const activeUrls = new Set(existingActive.map((d: any) => d.url));
+
+    const candidates = Array.from(urlMap.values()).filter((c) => !activeUrls.has(c.url));
+
+    res.json({
+      total: candidates.length,
+      breakdown: {
+        left_groups: leftDocs.length,
+        joined: joinedDocs.length,
+        skipped: skippedDocs.length,
+        already_active: activeUrls.size,
+      },
+      items: candidates.slice(0, 2000),
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /api/links/requeue-all-sources — add ALL-sources candidates to queue
+// Body: { urls?: string[], specialty?: string }
+// If urls provided, re-adds only those. Otherwise re-adds all preview candidates.
+router.post("/links/requeue-all-sources", async (req, res): Promise<void> => {
+  try {
+    const { urls, specialty } = req.body as { urls?: string[]; specialty?: string };
+    const targetLinksCol = await collections.targetLinks();
+    const joinedCol = await collections.joined();
+    const leftCol = await collections.leftGroups();
+    const { logger } = await import("../lib/logger.js");
+
+    let candidates: Array<{ url: string; title: string | null; specialty: string | null }> = [];
+
+    if (urls && urls.length > 0) {
+      // Re-add only specified URLs
+      for (const url of urls) {
+        candidates.push({ url, title: null, specialty: specialty ?? null });
+      }
+    } else {
+      // Get all candidates from preview
+      const leftDocs = await (leftCol as any).find({ url: { $exists: true, $nin: [null, ""] } }).toArray();
+      const joinedDocs = await (joinedCol as any).find({ url: { $exists: true, $nin: [null, ""] } }).toArray();
+      const skippedDocs = await targetLinksCol.find({ status: "skipped" } as any).toArray();
+
+      const urlMap = new Map<string, { url: string; title: string | null; specialty: string | null }>();
+      for (const d of leftDocs) {
+        urlMap.set(d.url, { url: d.url, title: d.title ?? null, specialty: d.specialty ?? null });
+      }
+      for (const d of joinedDocs) {
+        if (!urlMap.has(d.url)) {
+          urlMap.set(d.url, { url: d.url, title: d.groupTitle ?? null, specialty: d.specialty ?? null });
+        }
+      }
+      for (const d of skippedDocs) {
+        if (!urlMap.has(d.url)) {
+          urlMap.set(d.url, { url: d.url, title: (d as any).groupTitle ?? null, specialty: (d as any).specialty ?? null });
+        }
+      }
+
+      // Exclude already active
+      const existingActive = await targetLinksCol.find({ status: { $in: ["pending", "joined"] } } as any)
+        .project({ url: 1 }).toArray();
+      const activeUrls = new Set(existingActive.map((d: any) => d.url));
+      candidates = Array.from(urlMap.values()).filter((c) => !activeUrls.has(c.url));
+    }
+
+    if (candidates.length === 0) {
+      res.json({ added: 0, skipped: 0 });
+      return;
+    }
+
+    let added = 0;
+    let skipped = 0;
+    const now = new Date();
+
+    for (const c of candidates) {
+      const normalized = c.url;
+      const existing = await targetLinksCol.findOne({ url: normalized } as any);
+      if (existing && (existing.status === "pending" || existing.status === "joined")) {
+        skipped++;
+        continue;
+      }
+      if (existing) {
+        await targetLinksCol.updateOne(
+          { _id: existing._id },
+          { $set: { status: "pending", retryCount: 0, retryAfter: null, specialty: c.specialty ?? existing.specialty ?? null } } as any
+        );
+      } else {
+        await targetLinksCol.insertOne({
+          url: normalized,
+          status: "pending",
+          groupTitle: c.title,
+          specialty: c.specialty ?? null,
+          createdAt: now,
+          retryCount: 0,
+          retryAfter: null,
+          addedBy: "requeue_all_sources",
+        } as any);
+      }
+      added++;
+    }
+
+    logger.info({ added, skipped }, "Requeue all sources complete");
+    res.json({ added, skipped });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 router.delete("/links/:id", async (req, res): Promise<void> => {
   const id = req.params["id"];
