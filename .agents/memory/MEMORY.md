@@ -3,4 +3,5 @@
 - [Leave Engine Architecture](leave-engine.md) — separate leaveEngine.ts independent from join engine; leaveTick() GATED behind auto_leave_enabled setting (default: false/disabled)
 - [Keyword False Positive Fix](keyword-false-positive.md) — custom blocked keywords now use matchesWordBoundary() (Unicode regex) — prevents "ME" blocking "medicine"/"prometric"
 - [Session Protection Rules](session-protection.md) — 5 hard rules to prevent involuntary re-auth; never wipe sessionString except on banned accounts
-- [AI Specialty Routing](ai-specialty-routing.md) — Gemini batch classifier (20/call); internal collections auto-created per specialty; post-join classification is fire-and-forget IIFE
+- [AI Specialty Routing](ai-specialty-routing.md) — Gemini batch classifier (20/call); internal collections auto-created per specialty; post-join classification is fire-and-fire IIFE
+- [Keyword Classifier Comprehensive](keyword-classifier-comprehensive.md) — classifyByKeywords() + classifyGroupConfidence() (4-tier); SOFT_MEDICAL for Saudi cities/years/months → "probably_medical"; rejoin uses upsert not insertOne

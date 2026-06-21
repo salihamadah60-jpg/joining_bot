@@ -37,6 +37,8 @@ interface Dialog {
   classification: "medical" | "non_medical" | "uncertain";
 }
 
+type LeftGroupClassification = "medical" | "probably_medical" | "uncertain" | "non_medical";
+
 interface LeftGroup {
   id: string;
   url: string;
@@ -45,6 +47,7 @@ interface LeftGroup {
   chatType: string | null;
   reason: string;
   leftAt: string;
+  classification: LeftGroupClassification;
 }
 
 interface LeaveResultItem {
@@ -745,16 +748,51 @@ function LeaveManagerTab() {
   );
 }
 
+// ─── Left-group classification badge (4 states) ───────────────────────────────
+
+function LeftGroupBadge({ cls }: { cls: LeftGroupClassification }) {
+  if (cls === "medical") {
+    return (
+      <Badge className="text-[10px] py-0 gap-1 bg-emerald-500/15 text-emerald-400 border-emerald-500/30 border whitespace-nowrap">
+        <Stethoscope className="w-2.5 h-2.5" />
+        طبية
+      </Badge>
+    );
+  }
+  if (cls === "probably_medical") {
+    return (
+      <Badge className="text-[10px] py-0 gap-1 bg-blue-500/15 text-blue-400 border-blue-500/30 border whitespace-nowrap">
+        <HelpCircle className="w-2.5 h-2.5" />
+        تقريبا طبية
+      </Badge>
+    );
+  }
+  if (cls === "non_medical") {
+    return (
+      <Badge className="text-[10px] py-0 gap-1 bg-red-500/15 text-red-400 border-red-500/30 border whitespace-nowrap">
+        <XCircle className="w-2.5 h-2.5" />
+        غير طبي
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="text-[10px] py-0 gap-1 bg-zinc-500/10 text-zinc-400 border-zinc-500/20 border whitespace-nowrap">
+      <HelpCircle className="w-2.5 h-2.5" />
+      غير محدد
+    </Badge>
+  );
+}
+
 // ─── Leave History Tab ────────────────────────────────────────────────────────
 
 function LeaveHistoryTab() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [filterPhone, setFilterPhone] = useState<string>("all");
+  const [clsFilter, setClsFilter] = useState<LeftGroupClassification | "all">("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [allItems, setAllItems] = useState<LeftGroup[]>([]);
   const [loadedCount, setLoadedCount] = useState(500);
-  const [totalCount, setTotalCount] = useState(0);
+  const [searchQ, setSearchQ] = useState("");
 
   const { data: accountsData } = useListAccounts();
   const accounts = (accountsData as any) ?? [];
@@ -767,26 +805,43 @@ function LeaveHistoryTab() {
     refetchInterval: 30_000,
   });
 
-  // When data changes, update allItems and totalCount
-  useState(() => {
-    if (data) {
-      setAllItems(data.items ?? []);
-      setTotalCount(data.total ?? 0);
-    }
-  });
-  const items: LeftGroup[] = data?.items ?? allItems;
-  const total = data?.total ?? totalCount;
-  const hasMore = items.length < total;
+  const rawItems: LeftGroup[] = (data?.items ?? []).map((i: any) => ({
+    ...i,
+    classification: (i.classification ?? "uncertain") as LeftGroupClassification,
+  }));
+  const total = data?.total ?? 0;
 
-  const loadMore = () => {
-    setLoadedCount((prev) => prev + PAGE_SIZE);
-  };
+  // Count per classification
+  const counts = useMemo(() => {
+    const medical = rawItems.filter((i) => i.classification === "medical").length;
+    const probably = rawItems.filter((i) => i.classification === "probably_medical").length;
+    const uncertain = rawItems.filter((i) => i.classification === "uncertain").length;
+    const non_medical = rawItems.filter((i) => i.classification === "non_medical").length;
+    return { medical, probably, uncertain, non_medical, total: rawItems.length };
+  }, [rawItems]);
+
+  // Filter by classification + search
+  const items = useMemo(() => {
+    let list = clsFilter === "all" ? rawItems : rawItems.filter((i) => i.classification === clsFilter);
+    if (searchQ.trim()) {
+      const q = searchQ.toLowerCase();
+      list = list.filter(
+        (i) =>
+          (i.title ?? "").toLowerCase().includes(q) ||
+          (i.url ?? "").toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [rawItems, clsFilter, searchQ]);
+
+  const hasMore = rawItems.length < total;
+  const loadMore = () => setLoadedCount((prev) => prev + PAGE_SIZE);
 
   const rejoinMutation = useMutation({
     mutationFn: (urls: string[]) => rejoinUrls(urls),
     onSuccess: (result) => {
       toast({
-        title: "تمت إعادة الإضافة للطابور",
+        title: "✅ تمت إعادة الإضافة للطابور",
         description: `أُضيف: ${result.added} | موجود مسبقاً: ${result.skipped}`,
       });
       setSelectedIds(new Set());
@@ -798,8 +853,8 @@ function LeaveHistoryTab() {
 
   const requeueAllMutation = useMutation({
     mutationFn: async () => {
-      const allWithUrl = items.filter((i) => !!i.url);
-      const r = await fetch("/api/links/rejoin", {
+      const allWithUrl = rawItems.filter((i) => !!i.url);
+      const r = await fetch("/api/leave/rejoin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ urls: allWithUrl.map((i) => i.url) }),
@@ -822,7 +877,7 @@ function LeaveHistoryTab() {
   const rejoinableItems = selectedItems.filter((i) => !!i.url);
 
   const toggleAll = () => {
-    if (selectedIds.size === items.length) setSelectedIds(new Set());
+    if (selectedIds.size === items.length && items.length > 0) setSelectedIds(new Set());
     else setSelectedIds(new Set(items.map((i) => i.id)));
   };
 
@@ -833,11 +888,21 @@ function LeaveHistoryTab() {
     channels_limit: "حد القنوات",
   };
 
+  const clsRowColor = (cls: LeftGroupClassification, selected: boolean) => {
+    if (selected) return "bg-primary/5";
+    if (cls === "medical") return "hover:bg-emerald-500/5";
+    if (cls === "probably_medical") return "hover:bg-blue-500/5";
+    if (cls === "non_medical") return "hover:bg-red-500/5";
+    return "hover:bg-muted/30";
+  };
+
   return (
     <div className="space-y-4">
+
+      {/* ── Top controls ── */}
       <div className="flex flex-wrap items-center gap-3">
-        <Select value={filterPhone} onValueChange={(v) => { setFilterPhone(v); setLoadedCount(500); }}>
-          <SelectTrigger className="w-64 font-mono text-sm border-card-border bg-card/40">
+        <Select value={filterPhone} onValueChange={(v) => { setFilterPhone(v); setLoadedCount(500); setSelectedIds(new Set()); }}>
+          <SelectTrigger className="w-56 font-mono text-sm border-card-border bg-card/40">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -853,54 +918,100 @@ function LeaveHistoryTab() {
           </SelectContent>
         </Select>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => refetch()}
-          className="font-mono gap-2 border-card-border"
-        >
+        <Button variant="outline" size="sm" onClick={() => refetch()} className="font-mono gap-2 border-card-border">
           <RefreshCw className="w-3.5 h-3.5" />
           تحديث
         </Button>
 
         <span className="text-xs font-mono text-muted-foreground">
-          {items.length.toLocaleString()} / {total.toLocaleString()} مغادرة
+          {rawItems.length.toLocaleString()} / {total.toLocaleString()} مغادرة
         </span>
 
-        {/* Requeue ALL with URL */}
+        {/* Re-add all */}
         <Button
           variant="outline"
           size="sm"
           onClick={() => requeueAllMutation.mutate()}
-          disabled={requeueAllMutation.isPending || items.filter((i) => !!i.url).length === 0}
+          disabled={requeueAllMutation.isPending || rawItems.filter((i) => !!i.url).length === 0}
           className="font-mono gap-2 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
         >
-          {requeueAllMutation.isPending ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <RotateCcw className="w-3.5 h-3.5" />
-          )}
-          إعادة إدراج الكل ({items.filter((i) => !!i.url).length})
+          {requeueAllMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+          إعادة إدراج الكل ({rawItems.filter((i) => !!i.url).length})
         </Button>
 
+        {/* Re-add selected */}
         {rejoinableItems.length > 0 && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => rejoinMutation.mutate(rejoinableItems.map((i) => i.url))}
+            onClick={() => {
+              const urls = rejoinableItems.map((i) => i.url).filter(Boolean) as string[];
+              rejoinMutation.mutate(urls);
+            }}
             disabled={rejoinMutation.isPending}
             className="font-mono gap-2 border-primary/40 text-primary hover:bg-primary/10"
           >
-            {rejoinMutation.isPending ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <RotateCcw className="w-3.5 h-3.5" />
-            )}
+            {rejoinMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
             إعادة المحدد ({rejoinableItems.length})
           </Button>
         )}
       </div>
 
+      {/* ── 4-category filter buttons ── */}
+      {rawItems.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => { setClsFilter("all"); setSelectedIds(new Set()); }}
+            className={`text-xs font-mono px-2.5 py-1 rounded-md border transition-colors ${clsFilter === "all" ? "border-primary/50 bg-primary/10 text-primary" : "border-card-border text-muted-foreground hover:border-primary/30"}`}
+          >
+            الكل: {counts.total}
+          </button>
+          <button
+            onClick={() => { setClsFilter("medical"); setSelectedIds(new Set()); }}
+            className={`text-xs font-mono px-2.5 py-1 rounded-md border transition-colors ${clsFilter === "medical" ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400" : "border-card-border text-muted-foreground hover:border-emerald-500/30"}`}
+          >
+            🟢 طبية: {counts.medical}
+          </button>
+          <button
+            onClick={() => { setClsFilter("probably_medical"); setSelectedIds(new Set()); }}
+            className={`text-xs font-mono px-2.5 py-1 rounded-md border transition-colors ${clsFilter === "probably_medical" ? "border-blue-500/50 bg-blue-500/10 text-blue-400" : "border-card-border text-muted-foreground hover:border-blue-500/30"}`}
+          >
+            🔵 تقريبا طبية: {counts.probably}
+          </button>
+          <button
+            onClick={() => { setClsFilter("uncertain"); setSelectedIds(new Set()); }}
+            className={`text-xs font-mono px-2.5 py-1 rounded-md border transition-colors ${clsFilter === "uncertain" ? "border-zinc-500/50 bg-zinc-500/10 text-zinc-400" : "border-card-border text-muted-foreground hover:border-zinc-500/30"}`}
+          >
+            ⚫ غير محدد: {counts.uncertain}
+          </button>
+          <button
+            onClick={() => { setClsFilter("non_medical"); setSelectedIds(new Set()); }}
+            className={`text-xs font-mono px-2.5 py-1 rounded-md border transition-colors ${clsFilter === "non_medical" ? "border-red-500/50 bg-red-500/10 text-red-400" : "border-card-border text-muted-foreground hover:border-red-500/30"}`}
+          >
+            🔴 غير طبي: {counts.non_medical}
+          </button>
+
+          {/* Search within filter */}
+          <div className="relative mr-auto">
+            <Search className="absolute right-2.5 top-2 w-3 h-3 text-muted-foreground" />
+            <input
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+              placeholder="بحث..."
+              className="text-xs font-mono h-7 pr-7 pl-2 rounded-md border border-card-border bg-card/40 text-foreground focus:outline-none focus:border-primary/50 w-40"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Showing N results info ── */}
+      {(clsFilter !== "all" || searchQ) && (
+        <div className="text-xs font-mono text-muted-foreground">
+          عرض {items.length.toLocaleString()} من {rawItems.length.toLocaleString()} نتيجة
+        </div>
+      )}
+
+      {/* ── Table ── */}
       <Card className="border-card-border">
         <CardContent className="p-0">
           <Table>
@@ -914,6 +1025,7 @@ function LeaveHistoryTab() {
                   />
                 </TableHead>
                 <TableHead className="font-mono text-xs">TITLE</TableHead>
+                <TableHead className="font-mono text-xs w-24">CLASS</TableHead>
                 <TableHead className="font-mono text-xs">URL</TableHead>
                 <TableHead className="font-mono text-xs">ACCOUNT</TableHead>
                 <TableHead className="font-mono text-xs">REASON</TableHead>
@@ -923,24 +1035,22 @@ function LeaveHistoryTab() {
             <TableBody className="font-mono text-sm">
               {isLoading && (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
                     <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                   </TableCell>
                 </TableRow>
               )}
               {!isLoading && items.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground text-xs">
-                    لا توجد مغادرات مسجلة بعد
+                  <TableCell colSpan={7} className="h-24 text-center text-muted-foreground text-xs">
+                    {rawItems.length === 0 ? "لا توجد مغادرات مسجلة بعد" : "لا توجد نتائج بهذا الفلتر"}
                   </TableCell>
                 </TableRow>
               )}
               {items.map((item) => (
                 <TableRow
                   key={item.id}
-                  className={`border-card-border cursor-pointer ${
-                    selectedIds.has(item.id) ? "bg-primary/5" : "hover:bg-muted/30"
-                  }`}
+                  className={`border-card-border cursor-pointer transition-colors ${clsRowColor(item.classification, selectedIds.has(item.id))}`}
                   onClick={() => {
                     const next = new Set(selectedIds);
                     if (next.has(item.id)) next.delete(item.id);
@@ -961,12 +1071,25 @@ function LeaveHistoryTab() {
                     />
                   </TableCell>
                   <TableCell
-                    className="max-w-[180px] truncate text-primary/90"
+                    className="max-w-[160px] truncate font-medium"
                     title={item.title ?? ""}
+                    style={{
+                      color:
+                        item.classification === "medical"
+                          ? "rgba(52,211,153,0.9)"
+                          : item.classification === "probably_medical"
+                          ? "rgba(96,165,250,0.9)"
+                          : item.classification === "non_medical"
+                          ? "rgba(248,113,113,0.85)"
+                          : "rgba(255,255,255,0.65)",
+                    }}
                   >
                     {item.title || <span className="text-muted-foreground italic">—</span>}
                   </TableCell>
-                  <TableCell className="max-w-[220px] truncate">
+                  <TableCell>
+                    <LeftGroupBadge cls={item.classification} />
+                  </TableCell>
+                  <TableCell className="max-w-[200px] truncate">
                     {item.url ? (
                       <a
                         href={item.url}
@@ -993,7 +1116,7 @@ function LeaveHistoryTab() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground text-xs whitespace-nowrap">
-                    {format(new Date(item.leftAt), "yyyy-MM-dd HH:mm")}
+                    {format(new Date(item.leftAt), "MM-dd HH:mm")}
                   </TableCell>
                 </TableRow>
               ))}
@@ -1002,7 +1125,7 @@ function LeaveHistoryTab() {
         </CardContent>
       </Card>
 
-      {/* Load More button */}
+      {/* Load More */}
       {hasMore && (
         <div className="flex justify-center pt-2">
           <Button
@@ -1013,7 +1136,7 @@ function LeaveHistoryTab() {
             className="font-mono gap-2 border-card-border text-muted-foreground hover:text-foreground"
           >
             {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            تحميل {Math.min(PAGE_SIZE, total - items.length)} من {(total - items.length).toLocaleString()} متبقٍ
+            تحميل {Math.min(PAGE_SIZE, total - rawItems.length)} من {(total - rawItems.length).toLocaleString()} متبقٍ
           </Button>
         </div>
       )}

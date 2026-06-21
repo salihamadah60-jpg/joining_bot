@@ -21,6 +21,7 @@ import {
 } from "../lib/leaveEngine.js";
 import type { LeaveTarget } from "../lib/leaveEngine.js";
 import { classifyGroupQuick } from "../lib/groupFilter.js";
+import { classifyGroupConfidence } from "../lib/keywordSpecialtyClassifier.js";
 
 const router: IRouter = Router();
 
@@ -107,6 +108,7 @@ router.get("/leave/history", async (req, res): Promise<void> => {
         chatType: d.chatType ?? null,
         reason: d.reason,
         leftAt: new Date(d.leftAt).toISOString(),
+        classification: classifyGroupConfidence(d.title, d.url),
       })),
     });
   } catch (e: any) {
@@ -128,24 +130,53 @@ router.post("/leave/rejoin", async (req, res): Promise<void> => {
     let skipped = 0;
 
     for (const url of urls) {
-      try {
-        await targetLinksCol.insertOne({
-          _id: new ObjectId(),
-          url,
-          status: "pending",
-          failReason: null,
-          groupTitle: null,
-          groupType: null,
-          source: "rejoin",
-          usedByAccountPhone: null,
-          retryCount: 0,
-          retryAfter: null,
-          createdAt: new Date(),
-          processedAt: null,
-        });
-        added++;
-      } catch {
-        skipped++; // already exists
+      if (!url || typeof url !== "string") continue;
+
+      // Check if URL already exists in the target links collection
+      const existing = await targetLinksCol.findOne({ url });
+
+      if (existing) {
+        if (existing.status === "pending" || existing.status === "joined") {
+          // Already queued or already joined — skip
+          skipped++;
+        } else {
+          // Was failed/skipped — reset to pending so it gets retried
+          await targetLinksCol.updateOne(
+            { url },
+            {
+              $set: {
+                status: "pending",
+                failReason: null,
+                retryAfter: null,
+                processedAt: null,
+                retryCount: 0,
+                source: "rejoin",
+              },
+            }
+          );
+          added++;
+        }
+      } else {
+        // New URL — insert fresh
+        try {
+          await targetLinksCol.insertOne({
+            _id: new ObjectId(),
+            url,
+            status: "pending",
+            failReason: null,
+            groupTitle: null,
+            groupType: null,
+            source: "rejoin",
+            usedByAccountPhone: null,
+            retryCount: 0,
+            retryAfter: null,
+            createdAt: new Date(),
+            processedAt: null,
+          });
+          added++;
+        } catch {
+          skipped++;
+        }
       }
     }
 
