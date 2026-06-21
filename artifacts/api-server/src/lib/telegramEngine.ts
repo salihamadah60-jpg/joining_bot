@@ -212,7 +212,30 @@ async function tick(): Promise<void> {
       }
     }
 
-    const usable = allActive.filter((acc) => (acc.joinedToday ?? 0) < (acc.dailyLimit ?? DAILY_LIMIT));
+    // Filter out accounts that have hit or are near their channels cap.
+    // Hard limit: 500 (regular) / 1000 (Premium). We stop 10 before the wall
+    // so there is always a small buffer before CHANNELS_TOO_MUCH hits.
+    // Accounts already marked channels_limit are excluded by the { status: "active" }
+    // query above, but some may have an accurate channelsCount even before the error.
+    const usable = allActive.filter((acc) => {
+      if ((acc.joinedToday ?? 0) >= (acc.dailyLimit ?? DAILY_LIMIT)) return false;
+      const channelsCap = acc.isPremium ? 990 : 490;
+      if ((acc.channelsCount ?? 0) >= channelsCap) {
+        // Mark proactively so the engine skips it until leave-engine frees space
+        accountsCol.updateOne(
+          { _id: acc._id },
+          { $set: { status: "channels_limit", updatedAt: new Date() } }
+        ).catch(() => {});
+        eventBus.publish({
+          type: "channels_limit",
+          message: `⛔ الحساب ${acc.phone} وصل لحد القنوات (${acc.channelsCount}/${channelsCap + 10}) — سيُستأنف تلقائياً عند إفراغ مساحة`,
+          accountPhone: acc.phone,
+          timestamp: new Date().toISOString(),
+        });
+        return false;
+      }
+      return true;
+    });
 
     if (usable.length === 0) {
       scheduleNext(5 * 60_000);

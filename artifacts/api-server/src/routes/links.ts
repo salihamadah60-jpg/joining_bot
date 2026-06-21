@@ -338,22 +338,200 @@ router.post("/links/reuse-joined", async (req, res): Promise<void> => {
   res.json({ added, reset, skipped, total: joined.length });
 });
 
-// ─── Requeue skipped links ────────────────────────────────────────────────────
+// ─── Requeue skipped links (AI-powered full history scan) ────────────────────
 // POST /api/links/requeue-skipped
-// Resets all TARGET_LINKS with status "skipped" back to "pending" so the bot
-// will retry them with the updated keyword filter / AI classifier.
+// 1. Immediately resets all "skipped" TARGET_LINKS back to "pending".
+// 2. Spawns a background job that reads the FULL join_history, classifies
+//    every failed/unknown link title with Gemini, and re-queues any that
+//    belong to one of the 8 medical specialties.
 router.post("/links/requeue-skipped", async (req, res): Promise<void> => {
   const col = await collections.targetLinks();
-  const result = await col.updateMany(
+
+  // Step 1 — reset all skipped links instantly (existing behaviour, very fast)
+  const skippedResult = await col.updateMany(
     { status: "skipped" },
     { $set: { status: "pending", failReason: null, retryCount: 0, retryAfter: null, processedAt: null } }
   );
+
+  // Respond immediately so the UI doesn't wait for the AI scan
   res.json({
     ok: true,
-    updated: result.modifiedCount,
-    message: `تمت إعادة ${result.modifiedCount.toLocaleString()} رابط مُتجاهَل إلى قائمة الانتظار`,
+    immediate: skippedResult.modifiedCount,
+    background: true,
+    message: `تمت إعادة ${skippedResult.modifiedCount.toLocaleString()} رابط مُتجاهَل فوراً — جارٍ فحص السجل الكامل بالذكاء الاصطناعي في الخلفية...`,
+  });
+
+  // Step 2 — background AI scan (fire-and-forget)
+  runMedicalRequeueFromHistory().catch((err) => {
+    eventBus.publish({
+      type: "requeue_error",
+      message: `❌ فشل فحص سجل الانضمام: ${String(err)}`,
+      timestamp: new Date().toISOString(),
+    });
   });
 });
+
+/**
+ * Background job: scan the full join_history, resolve group titles from
+ * TARGET_LINKS / JOINED / left_groups, classify with AI, and re-add any
+ * medical link that is not already pending/joined back to the queue.
+ */
+async function runMedicalRequeueFromHistory(): Promise<void> {
+  const { classifySpecialtyBatch } = await import("../lib/aiSpecialtyClassifier.js");
+  const { logger } = await import("../lib/logger.js");
+  const { ObjectId } = await import("mongodb");
+
+  const targetLinksCol = await collections.targetLinks();
+  const joinHistoryCol = await collections.joinHistory();
+  const joinedCol     = await collections.joined();
+  const leftCol       = await collections.leftGroups();
+
+  // ── Collect all unique URLs from full join history ─────────────────────────
+  const historyUrls: string[] = await (joinHistoryCol as any).distinct("linkUrl");
+
+  if (historyUrls.length === 0) {
+    eventBus.publish({
+      type: "requeue_complete",
+      message: "✅ السجل فارغ — لا روابط للفحص",
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
+  // ── Fetch current TARGET_LINKS status for all those URLs ──────────────────
+  const existingLinks = await targetLinksCol.find(
+    { url: { $in: historyUrls } } as any
+  ).toArray();
+
+  const existingByUrl = new Map<string, any>();
+  for (const l of existingLinks) existingByUrl.set(l.url, l);
+
+  // ── Determine candidates: links that should be re-checked with AI ─────────
+  // Include:
+  //   • Not in TARGET_LINKS at all (never processed or was deleted)
+  //   • status === "failed" with a filter-based reason (not_in_scope,
+  //     BLOCKED_PRE:<keyword>, BLOCKED_POST:<keyword>)
+  // Exclude channels (CHANNEL_BLOCKED / CHANNEL_BLOCKED_PRE) — intentional block.
+  // Exclude already pending / joined / invite_request / pending_review.
+  const candidates: Array<{ url: string; title: string | null; existingId: any | null }> = [];
+
+  for (const url of historyUrls) {
+    if (!url) continue;
+    const existing = existingByUrl.get(url);
+
+    if (!existing) {
+      candidates.push({ url, title: null, existingId: null });
+      continue;
+    }
+
+    if (existing.status === "pending" || existing.status === "joined" ||
+        existing.status === "invite_request" || existing.status === "pending_review") {
+      continue; // already active — skip
+    }
+
+    if (existing.status === "failed") {
+      const r = existing.failReason ?? "";
+      // Only re-check if the rejection was from a filter, not a hard channel/Telegram error
+      const isFilterReject =
+        r === "not_in_scope" ||
+        r.startsWith("BLOCKED_PRE:") ||
+        r.startsWith("BLOCKED_POST:");
+      if (isFilterReject) {
+        candidates.push({ url, title: existing.groupTitle ?? null, existingId: existing._id });
+      }
+    }
+  }
+
+  if (candidates.length === 0) {
+    eventBus.publish({
+      type: "requeue_complete",
+      message: "✅ فحص السجل اكتمل — لا روابط طبية جديدة تستحق إعادة الإضافة",
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
+  // ── Enrich missing titles from JOINED + left_groups ───────────────────────
+  const urlsWithoutTitle = candidates.filter((c) => !c.title).map((c) => c.url);
+  if (urlsWithoutTitle.length > 0) {
+    const joinedDocs = await joinedCol.find({ url: { $in: urlsWithoutTitle } }).toArray();
+    const leftDocs   = await (leftCol as any).find({ url: { $in: urlsWithoutTitle } }).toArray();
+
+    const titleByUrl = new Map<string, string>();
+    for (const d of joinedDocs) if (d.groupTitle) titleByUrl.set(d.url, d.groupTitle);
+    for (const d of leftDocs)   if (d.title)      titleByUrl.set(d.url, d.title);
+
+    for (const c of candidates) {
+      if (!c.title && titleByUrl.has(c.url)) c.title = titleByUrl.get(c.url)!;
+    }
+  }
+
+  // ── AI classification in batches of 20 ────────────────────────────────────
+  const BATCH_SIZE  = 20;
+  const BATCH_DELAY = 4_000;
+  let added      = 0;
+  let classified = 0;
+  const now = new Date();
+
+  for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+    if (i > 0) await new Promise<void>((r) => setTimeout(r, BATCH_DELAY));
+
+    const chunk     = candidates.slice(i, i + BATCH_SIZE);
+    const items     = chunk.map((c) => ({ title: c.title, url: c.url }));
+    const specialties = await classifySpecialtyBatch(items);
+
+    for (let j = 0; j < chunk.length; j++) {
+      const c         = chunk[j]!;
+      const specialty = specialties[j] ?? null;
+      classified++;
+
+      if (specialty === null) continue; // Not medical — skip
+
+      if (c.existingId) {
+        // Reset the existing failed link back to pending with correct specialty
+        await targetLinksCol.updateOne(
+          { _id: c.existingId },
+          { $set: { status: "pending", failReason: null, retryCount: 0, retryAfter: null, processedAt: null, specialty } } as any
+        );
+      } else {
+        // New entry — insert as pending
+        try {
+          await targetLinksCol.insertOne({
+            _id: new ObjectId(),
+            url: c.url,
+            status: "pending",
+            groupTitle: c.title ?? null,
+            specialty,
+            source: "requeue_from_history",
+            failReason: null,
+            retryCount: 0,
+            retryAfter: null,
+            createdAt: now,
+            processedAt: null,
+            usedByAccountPhone: null,
+            groupType: null,
+          } as any);
+        } catch (e: any) {
+          if (e?.code !== 11000) throw e; // ignore duplicates
+        }
+      }
+      added++;
+    }
+
+    eventBus.publish({
+      type: "requeue_progress",
+      message: `🔄 فحص السجل: ${Math.min(i + BATCH_SIZE, candidates.length).toLocaleString()}/${candidates.length.toLocaleString()} — أُعيد إدراج ${added} رابط طبي`,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  logger.info({ classified, added }, "Medical requeue from history complete");
+  eventBus.publish({
+    type: "requeue_complete",
+    message: `✅ اكتمل فحص السجل الكامل: فُحص ${classified.toLocaleString()} رابط — أُعيد إدراج ${added.toLocaleString()} رابط طبي إلى قائمة الانتظار`,
+    timestamp: new Date().toISOString(),
+  });
+}
 
 // ─── AI Batch Specialty Classification ───────────────────────────────────────
 // POST /api/links/classify-batch
