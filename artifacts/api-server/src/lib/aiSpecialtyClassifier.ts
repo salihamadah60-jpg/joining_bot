@@ -117,79 +117,97 @@ export async function classifySpecialty(
 }
 
 /**
- * Classify MULTIPLE groups in one Gemini API call (up to 20 per batch).
- * Returns an array of specialty codes (9 simplified) with the same length as input.
+ * Classify MULTIPLE groups.
+ *
+ * STRATEGY (in order):
+ * 1. Keyword classifier (instant, no API) — handles the vast majority.
+ * 2. Gemini AI — ONLY called for items that keywords couldn't determine,
+ *    and ONLY when GEMINI_API_KEY is set and quota is available.
+ *    AI failure is silent — keyword result (null) is returned instead.
  */
 export async function classifySpecialtyBatch(
   items: Array<{ title?: string | null; url?: string | null }>
 ): Promise<Array<SpecialtyCode>> {
+  const { classifyBatchByKeywords } = await import("./keywordSpecialtyClassifier.js");
+
+  // Step 1: keyword classifier — runs synchronously, no quota issues
+  const results: Array<SpecialtyCode> = classifyBatchByKeywords(items);
+
+  // Step 2: collect indices that keywords couldn't classify (null)
+  const needsAI: number[] = [];
+  for (let i = 0; i < results.length; i++) {
+    if (results[i] === null) needsAI.push(i);
+  }
+
+  // If everything was classified by keywords, skip AI entirely
+  if (needsAI.length === 0) {
+    logger.debug({ count: items.length }, "All items classified by keywords — no AI needed");
+    return results;
+  }
+
+  // Step 3: try Gemini for the remaining uncertain items
   const apiKey = process.env["GEMINI_API_KEY"];
   if (!apiKey) {
-    logger.warn("GEMINI_API_KEY not set — specialty classifier disabled");
-    return items.map(() => null);
+    logger.debug("GEMINI_API_KEY not set — using keyword results only");
+    return results;
   }
 
   const GenAI = await loadGemini();
   if (!GenAI) {
-    logger.warn("@google/generative-ai not available — specialty classifier disabled");
-    return items.map(() => null);
+    logger.debug("@google/generative-ai not available — using keyword results only");
+    return results;
   }
 
   try {
     const genAI = new GenAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    const inputs = items.map((item, i) => {
+    const aiItems = needsAI.map((idx) => items[idx]!);
+    const inputs = aiItems.map((item, j) => {
       const name =
         item.title?.trim() ||
         item.url?.replace(/https?:\/\/t\.me\/\+?/, "").replace(/[_+]/g, " ").trim() ||
-        `group_${i}`;
-      return `${i}: ${name}`;
+        `group_${j}`;
+      return `${j}: ${name}`;
     });
 
-    const prompt = `${SYSTEM_PROMPT}\n\nClassify these ${items.length} groups:\n${inputs.join("\n")}`;
-
+    const prompt = `${SYSTEM_PROMPT}\n\nClassify these ${aiItems.length} groups:\n${inputs.join("\n")}`;
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim();
 
     const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      logger.warn({ text: text.substring(0, 500) }, "AI specialty: no JSON array in response");
-      return items.map(() => null);
-    }
+    if (jsonMatch) {
+      const parsed: Array<{ i: number; s: string | null }> = JSON.parse(jsonMatch[0]);
+      const VALID_CODES = new Set<string>(ALL_SPECIALTY_CODES.filter(c => c !== "channels_only"));
 
-    const parsed: Array<{ i: number; s: string | null }> = JSON.parse(jsonMatch[0]);
-    const resultMap = new Map<number, SpecialtyCode>();
-
-    const VALID_CODES = new Set<string>(ALL_SPECIALTY_CODES.filter(c => c !== "channels_only"));
-
-    for (const entry of parsed) {
-      if (typeof entry.i !== "number") continue;
-      const raw = entry.s;
-      if (raw === null) {
-        resultMap.set(entry.i, null);
-      } else if (VALID_CODES.has(raw)) {
-        resultMap.set(entry.i, raw as SpecialtyCode);
-      } else if (SPECIALTY_PARENT_MAP[raw]) {
-        // Downgrade old detailed code to parent simplified code
-        resultMap.set(entry.i, SPECIALTY_PARENT_MAP[raw] as SpecialtyCode);
-      } else {
-        logger.warn({ code: raw }, "AI returned unknown specialty code — treating as general medical");
-        resultMap.set(entry.i, "general");
+      for (const entry of parsed) {
+        if (typeof entry.i !== "number") continue;
+        const originalIdx = needsAI[entry.i];
+        if (originalIdx === undefined) continue;
+        const raw = entry.s;
+        if (raw === null) {
+          // AI says not medical — keep null
+        } else if (VALID_CODES.has(raw)) {
+          results[originalIdx] = raw as SpecialtyCode;
+        } else if (SPECIALTY_PARENT_MAP[raw]) {
+          results[originalIdx] = SPECIALTY_PARENT_MAP[raw] as SpecialtyCode;
+        } else {
+          results[originalIdx] = "general";
+        }
       }
+      logger.debug({ total: items.length, sentToAI: needsAI.length }, "AI batch classify supplemented keyword results");
     }
-
-    logger.debug({ count: items.length, classified: resultMap.size }, "AI batch classify complete");
-    return items.map((_, i) => resultMap.get(i) ?? null);
-  } catch (err) {
-    logger.warn({ err }, "AI specialty batch classify failed");
-    return items.map(() => null);
+  } catch (err: any) {
+    // Quota exceeded or other AI error — silently use keyword results
+    logger.debug({ msg: String(err?.message ?? err).substring(0, 120) }, "AI classify skipped (using keyword results)");
   }
+
+  return results;
 }
 
 /**
  * Process items in BATCHES of BATCH_SIZE with optional progress callback.
- * Use this for classifying large numbers of links.
+ * Keywords handle most items instantly; AI is only invoked for the remainder.
  */
 export async function classifySpecialtyBatched(
   items: Array<{ title?: string | null; url?: string | null }>,

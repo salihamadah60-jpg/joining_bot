@@ -372,19 +372,19 @@ router.post("/links/requeue-skipped", async (req, res): Promise<void> => {
 });
 
 /**
- * Background job: scan the full join_history, resolve group titles from
- * TARGET_LINKS / JOINED / left_groups, classify with AI, and re-add any
+ * Background job: scan the full join_history + all sources, resolve group titles,
+ * classify with keyword classifier (primary) + AI (fallback), and re-add any
  * medical link that is not already pending/joined back to the queue.
  */
 async function runMedicalRequeueFromHistory(): Promise<void> {
-  const { classifySpecialtyBatch } = await import("../lib/aiSpecialtyClassifier.js");
+  const { classifyByKeywords } = await import("../lib/keywordSpecialtyClassifier.js");
   const { logger } = await import("../lib/logger.js");
   const { ObjectId } = await import("mongodb");
 
   const targetLinksCol = await collections.targetLinks();
   const joinHistoryCol = await collections.joinHistory();
-  const joinedCol     = await collections.joined();
-  const leftCol       = await collections.leftGroups();
+  const joinedCol      = await collections.joined();
+  const leftCol        = await collections.leftGroups();
 
   // ── Collect all unique URLs from full join history ─────────────────────────
   const historyUrls: string[] = await (joinHistoryCol as any).distinct("linkUrl");
@@ -398,21 +398,43 @@ async function runMedicalRequeueFromHistory(): Promise<void> {
     return;
   }
 
-  // ── Fetch current TARGET_LINKS status for all those URLs ──────────────────
-  const existingLinks = await targetLinksCol.find(
-    { url: { $in: historyUrls } } as any
-  ).toArray();
+  eventBus.publish({
+    type: "requeue_progress",
+    message: `🔍 وُجد ${historyUrls.length.toLocaleString()} رابط فريد في السجل — جاري تحليلها...`,
+    timestamp: new Date().toISOString(),
+  });
 
+  // ── Build title lookup from ALL sources ────────────────────────────────────
+  // JOINED: groupTitle field
+  // left_groups: title field
+  // TARGET_LINKS: groupTitle field
+  const titleByUrl = new Map<string, string>();
+
+  const [joinedDocs, leftDocs, targetDocs] = await Promise.all([
+    joinedCol.find({ url: { $in: historyUrls }, groupTitle: { $exists: true, $nin: [null, ""] } } as any).toArray(),
+    (leftCol as any).find({ url: { $in: historyUrls }, title: { $exists: true, $nin: [null, ""] } }).toArray(),
+    targetLinksCol.find({ url: { $in: historyUrls }, groupTitle: { $exists: true, $nin: [null, ""] } } as any).toArray(),
+  ]);
+
+  for (const d of targetDocs) if ((d as any).groupTitle) titleByUrl.set(d.url, (d as any).groupTitle);
+  for (const d of joinedDocs)  if ((d as any).groupTitle) titleByUrl.set(d.url, (d as any).groupTitle);
+  for (const d of leftDocs)    if (d.title)               titleByUrl.set(d.url, d.title);
+
+  // ── Fetch current TARGET_LINKS status for all those URLs ──────────────────
+  const existingLinks = await targetLinksCol.find({ url: { $in: historyUrls } } as any).toArray();
   const existingByUrl = new Map<string, any>();
   for (const l of existingLinks) existingByUrl.set(l.url, l);
 
-  // ── Determine candidates: links that should be re-checked with AI ─────────
+  // URLs that are already in JOINED collection — no need to re-add
+  const joinedUrls = new Set(joinedDocs.map((d) => d.url));
+
+  // ── Determine candidates ───────────────────────────────────────────────────
   // Include:
-  //   • Not in TARGET_LINKS at all (never processed or was deleted)
-  //   • status === "failed" with a filter-based reason (not_in_scope,
-  //     BLOCKED_PRE:<keyword>, BLOCKED_POST:<keyword>)
-  // Exclude channels (CHANNEL_BLOCKED / CHANNEL_BLOCKED_PRE) — intentional block.
-  // Exclude already pending / joined / invite_request / pending_review.
+  //   • Not in TARGET_LINKS + not in JOINED → likely historic, may be medical
+  //   • status "failed" with filter-based reason: not_in_scope / BLOCKED_PRE / BLOCKED_POST
+  //   • status "skipped" → re-check with keyword classifier
+  // Exclude: active (pending/joined/invite_request/pending_review)
+  // Exclude: channels (CHANNEL_BLOCKED / CHANNEL_BLOCKED_PRE) — intentional block
   const candidates: Array<{ url: string; title: string | null; existingId: any | null }> = [];
 
   for (const url of historyUrls) {
@@ -420,25 +442,30 @@ async function runMedicalRequeueFromHistory(): Promise<void> {
     const existing = existingByUrl.get(url);
 
     if (!existing) {
-      candidates.push({ url, title: null, existingId: null });
+      // Not in TARGET_LINKS at all
+      if (joinedUrls.has(url)) continue; // already joined → skip
+      candidates.push({ url, title: titleByUrl.get(url) ?? null, existingId: null });
       continue;
     }
 
-    if (existing.status === "pending" || existing.status === "joined" ||
-        existing.status === "invite_request" || existing.status === "pending_review") {
-      continue; // already active — skip
-    }
+    const status = existing.status as string;
 
-    if (existing.status === "failed") {
-      const r = existing.failReason ?? "";
-      // Only re-check if the rejection was from a filter, not a hard channel/Telegram error
-      const isFilterReject =
-        r === "not_in_scope" ||
-        r.startsWith("BLOCKED_PRE:") ||
-        r.startsWith("BLOCKED_POST:");
+    // Already active → skip
+    if (status === "pending" || status === "joined" ||
+        status === "invite_request" || status === "pending_review") continue;
+
+    if (status === "failed") {
+      const r = (existing.failReason ?? "") as string;
+      // Hard channel block → skip (intentional, not a filter mistake)
+      if (r === "CHANNEL_BLOCKED" || r === "CHANNEL_BLOCKED_PRE") continue;
+      // Filter-based rejection → re-check with keyword classifier
+      const isFilterReject = r === "not_in_scope" || r.startsWith("BLOCKED_PRE:") || r.startsWith("BLOCKED_POST:");
       if (isFilterReject) {
-        candidates.push({ url, title: existing.groupTitle ?? null, existingId: existing._id });
+        candidates.push({ url, title: titleByUrl.get(url) ?? existing.groupTitle ?? null, existingId: existing._id });
       }
+      // Other Telegram errors (FLOOD_WAIT, USER_BANNED, etc.) → leave for engine to retry
+    } else if (status === "skipped") {
+      candidates.push({ url, title: titleByUrl.get(url) ?? existing.groupTitle ?? null, existingId: existing._id });
     }
   }
 
@@ -451,94 +478,75 @@ async function runMedicalRequeueFromHistory(): Promise<void> {
     return;
   }
 
-  // ── Enrich missing titles from JOINED + left_groups ───────────────────────
-  const urlsWithoutTitle = candidates.filter((c) => !c.title).map((c) => c.url);
-  if (urlsWithoutTitle.length > 0) {
-    const joinedDocs = await joinedCol.find({ url: { $in: urlsWithoutTitle } }).toArray();
-    const leftDocs   = await (leftCol as any).find({ url: { $in: urlsWithoutTitle } }).toArray();
+  eventBus.publish({
+    type: "requeue_progress",
+    message: `🔑 تصنيف ${candidates.length.toLocaleString()} مرشح بالكلمات المفتاحية (فوري، بدون AI)...`,
+    timestamp: new Date().toISOString(),
+  });
 
-    const titleByUrl = new Map<string, string>();
-    for (const d of joinedDocs) if (d.groupTitle) titleByUrl.set(d.url, d.groupTitle);
-    for (const d of leftDocs)   if (d.title)      titleByUrl.set(d.url, d.title);
-
-    for (const c of candidates) {
-      if (!c.title && titleByUrl.has(c.url)) c.title = titleByUrl.get(c.url)!;
-    }
-  }
-
-  // ── AI classification in batches of 20 ────────────────────────────────────
-  const BATCH_SIZE  = 20;
-  const BATCH_DELAY = 4_000;
-  let added      = 0;
-  let classified = 0;
+  // ── Keyword classification (instant, zero API calls) ──────────────────────
+  let added = 0;
   const now = new Date();
+  const REPORT_EVERY = 500;
 
-  for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
-    if (i > 0) await new Promise<void>((r) => setTimeout(r, BATCH_DELAY));
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i]!;
+    const specialty = classifyByKeywords(c.title, c.url);
 
-    const chunk     = candidates.slice(i, i + BATCH_SIZE);
-    const items     = chunk.map((c) => ({ title: c.title, url: c.url }));
-    const specialties = await classifySpecialtyBatch(items);
+    if (specialty === null) continue; // Not medical
 
-    for (let j = 0; j < chunk.length; j++) {
-      const c         = chunk[j]!;
-      const specialty = specialties[j] ?? null;
-      classified++;
-
-      if (specialty === null) continue; // Not medical — skip
-
-      if (c.existingId) {
-        // Reset the existing failed link back to pending with correct specialty
-        await targetLinksCol.updateOne(
-          { _id: c.existingId },
-          { $set: { status: "pending", failReason: null, retryCount: 0, retryAfter: null, processedAt: null, specialty } } as any
-        );
-      } else {
-        // New entry — insert as pending
-        try {
-          await targetLinksCol.insertOne({
-            _id: new ObjectId(),
-            url: c.url,
-            status: "pending",
-            groupTitle: c.title ?? null,
-            specialty,
-            source: "requeue_from_history",
-            failReason: null,
-            retryCount: 0,
-            retryAfter: null,
-            createdAt: now,
-            processedAt: null,
-            usedByAccountPhone: null,
-            groupType: null,
-          } as any);
-        } catch (e: any) {
-          if (e?.code !== 11000) throw e; // ignore duplicates
-        }
+    if (c.existingId) {
+      await targetLinksCol.updateOne(
+        { _id: c.existingId },
+        { $set: { status: "pending", failReason: null, retryCount: 0, retryAfter: null, processedAt: null, specialty } } as any
+      );
+    } else {
+      try {
+        await targetLinksCol.insertOne({
+          _id: new ObjectId(),
+          url: c.url,
+          status: "pending",
+          groupTitle: c.title ?? null,
+          specialty,
+          source: "requeue_from_history",
+          failReason: null,
+          retryCount: 0,
+          retryAfter: null,
+          createdAt: now,
+          processedAt: null,
+          usedByAccountPhone: null,
+          groupType: null,
+        } as any);
+      } catch (e: any) {
+        if (e?.code !== 11000) throw e; // ignore duplicates
       }
-      added++;
     }
+    added++;
 
-    eventBus.publish({
-      type: "requeue_progress",
-      message: `🔄 فحص السجل: ${Math.min(i + BATCH_SIZE, candidates.length).toLocaleString()}/${candidates.length.toLocaleString()} — أُعيد إدراج ${added} رابط طبي`,
-      timestamp: new Date().toISOString(),
-    });
+    if ((i + 1) % REPORT_EVERY === 0 || i === candidates.length - 1) {
+      eventBus.publish({
+        type: "requeue_progress",
+        message: `🔄 فُحص ${(i + 1).toLocaleString()}/${candidates.length.toLocaleString()} — أُعيد إدراج ${added.toLocaleString()} رابط طبي`,
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
-  logger.info({ classified, added }, "Medical requeue from history complete");
+  logger.info({ total: candidates.length, added }, "Medical requeue from history complete");
   eventBus.publish({
     type: "requeue_complete",
-    message: `✅ اكتمل فحص السجل الكامل: فُحص ${classified.toLocaleString()} رابط — أُعيد إدراج ${added.toLocaleString()} رابط طبي إلى قائمة الانتظار`,
+    message: `✅ اكتمل فحص السجل: فُحص ${candidates.length.toLocaleString()} مرشح — أُعيد إدراج ${added.toLocaleString()} رابط طبي إلى قائمة الانتظار`,
     timestamp: new Date().toISOString(),
   });
 }
 
-// ─── AI Batch Specialty Classification ───────────────────────────────────────
+// ─── Keyword + AI Batch Specialty Classification ─────────────────────────────
 // POST /api/links/classify-batch
 // Classifies joined + invite_request + synced_dialogs + left_groups + skipped links.
 // Returns immediately; runs in background; emits SSE events for progress.
+// PRIMARY: keyword classifier (instant, no quota). AI used only for remainder.
 router.post("/links/classify-batch", async (req, res): Promise<void> => {
-  res.json({ ok: true, background: true, message: "AI classification started in background" });
+  res.json({ ok: true, background: true, message: "تصنيف المجموعات بدأ في الخلفية" });
   runBatchClassification().catch((err) => {
     eventBus.publish({
       type: "classify_error",
@@ -549,16 +557,23 @@ router.post("/links/classify-batch", async (req, res): Promise<void> => {
 });
 
 async function runBatchClassification(): Promise<void> {
-  const { classifySpecialtyBatched } = await import("../lib/aiSpecialtyClassifier.js");
+  const { classifyBatchByKeywords } = await import("../lib/keywordSpecialtyClassifier.js");
+  const { classifySpecialtyBatch } = await import("../lib/aiSpecialtyClassifier.js");
   const { ensureSpecialtyCollection, incrementSpecialtyCollectionCount } = await import("../lib/specialtyCollections.js");
   const { logger } = await import("../lib/logger.js");
 
-  // ── Source 1: JOINED collection ───────────────────────────────────────────────
+  type SourceType = "joined" | "invite" | "left_group" | "skipped_link" | "synced_dialog";
+  const urlMap = new Map<string, { title: string; url: string; source: SourceType; id: any }>();
+
+  // ── Source 1: JOINED collection ──────────────────────────────────────────────
   const joinedCol = await collections.joined();
   const joinedLinks = await joinedCol.find({
     groupTitle: { $exists: true, $nin: [null, ""] },
     $or: [{ specialty: { $exists: false } }, { specialty: null }],
   } as any).toArray();
+  for (const l of joinedLinks) {
+    urlMap.set(l.url, { title: (l as any).groupTitle, url: l.url, source: "joined", id: l._id });
+  }
 
   // ── Source 2: invite_requests collection ─────────────────────────────────────
   const inviteCol = await collections.inviteRequests();
@@ -566,20 +581,13 @@ async function runBatchClassification(): Promise<void> {
     groupTitle: { $exists: true, $nin: [null, ""] },
     $or: [{ specialty: { $exists: false } }, { specialty: null }],
   } as any).toArray();
-
-  type SourceType = "joined" | "invite" | "left_group" | "skipped_link";
-  const urlMap = new Map<string, { title: string; url: string; source: SourceType; id: any }>();
-
-  for (const l of joinedLinks) {
-    urlMap.set(l.url, { title: (l as any).groupTitle, url: l.url, source: "joined", id: l._id });
-  }
   for (const l of inviteLinks) {
     if (!urlMap.has(l.url)) {
       urlMap.set(l.url, { title: (l as any).groupTitle, url: l.url, source: "invite", id: l._id });
     }
   }
 
-  // ── Source 3: left_groups — groups we've left ─────────────────────────────────
+  // ── Source 3: left_groups ─────────────────────────────────────────────────────
   const leftCol = await collections.leftGroups();
   const leftRecords = await (leftCol as any).find({
     title: { $exists: true, $nin: [null, ""] },
@@ -604,6 +612,19 @@ async function runBatchClassification(): Promise<void> {
     }
   }
 
+  // ── Source 5: synced_dialogs (account dialogs synced from all accounts) ───────
+  const syncedCol = await collections.syncedDialogs();
+  const syncedDialogs = await (syncedCol as any).find({
+    title: { $exists: true, $nin: [null, ""] },
+    url: { $exists: true, $nin: [null, ""] },
+    $or: [{ specialty: { $exists: false } }, { specialty: null }],
+  }).toArray();
+  for (const d of syncedDialogs) {
+    if (d.url && !urlMap.has(d.url)) {
+      urlMap.set(d.url, { title: d.title, url: d.url, source: "synced_dialog", id: d._id });
+    }
+  }
+
   const deduped = Array.from(urlMap.values());
   const total = deduped.length;
 
@@ -612,11 +633,12 @@ async function runBatchClassification(): Promise<void> {
     `${inviteLinks.length} دعوات`,
     `${leftRecords.length} مغادَر`,
     `${skippedRecords.length} مُتجاهَل`,
+    `${syncedDialogs.length} مزامنة`,
   ].join(" + ");
 
   eventBus.publish({
     type: "classify_start",
-    message: `🤖 بدء التصنيف الذكي — ${total.toLocaleString()} مجموعة (${sourceBreakdown})`,
+    message: `🔑 بدء التصنيف بالكلمات المفتاحية — ${total.toLocaleString()} مجموعة (${sourceBreakdown})`,
     total,
     classified: 0,
     timestamp: new Date().toISOString(),
@@ -634,19 +656,47 @@ async function runBatchClassification(): Promise<void> {
   }
 
   const items = deduped.map((l) => ({ title: l.title, url: l.url }));
-  let classified = 0;
 
-  const results = await classifySpecialtyBatched(items, (done, _total) => {
+  // ── Step 1: keyword classification (instant, no API calls) ───────────────────
+  const keywordResults = classifyBatchByKeywords(items);
+  let keywordCount = keywordResults.filter(r => r !== null).length;
+
+  // ── Step 2: for items keywords couldn't classify, try AI in small batches ────
+  const needsAI: number[] = [];
+  for (let i = 0; i < keywordResults.length; i++) {
+    if (keywordResults[i] === null) needsAI.push(i);
+  }
+
+  const results = [...keywordResults];
+  const AI_BATCH = 20;
+
+  if (needsAI.length > 0) {
     eventBus.publish({
       type: "classify_progress",
-      message: `🔄 تم تصنيف ${done.toLocaleString()} من ${_total.toLocaleString()}...`,
-      total: _total,
-      classified: done,
+      message: `🔑 الكلمات المفتاحية: ${keywordCount.toLocaleString()} مصنَّف — 🤖 الذكاء الاصطناعي يفحص ${needsAI.length.toLocaleString()} باقي...`,
+      total,
+      classified: keywordCount,
       timestamp: new Date().toISOString(),
     });
-  });
 
+    for (let batch = 0; batch < needsAI.length; batch += AI_BATCH) {
+      if (batch > 0) await new Promise<void>((r) => setTimeout(r, 4_000));
+      const batchIndices = needsAI.slice(batch, batch + AI_BATCH);
+      const batchItems = batchIndices.map(i => items[i]!);
+      try {
+        const aiResults = await classifySpecialtyBatch(batchItems);
+        for (let j = 0; j < batchIndices.length; j++) {
+          if (aiResults[j] !== null) results[batchIndices[j]!] = aiResults[j]!;
+        }
+      } catch {
+        // AI failed for this batch — skip, keyword results stand
+      }
+    }
+  }
+
+  // ── Step 3: persist results ───────────────────────────────────────────────────
   const specialtyDeltas = new Map<string, number>();
+  let classified = 0;
 
   for (let i = 0; i < deduped.length; i++) {
     const specialty = results[i];
@@ -654,7 +704,6 @@ async function runBatchClassification(): Promise<void> {
 
     const { url, source, id } = deduped[i]!;
 
-    // Update the source collection record
     if (source === "joined") {
       await joinedCol.updateOne({ _id: id }, { $set: { specialty } } as any);
     } else if (source === "invite") {
@@ -663,9 +712,11 @@ async function runBatchClassification(): Promise<void> {
       await (leftCol as any).updateOne({ _id: id }, { $set: { specialty } });
     } else if (source === "skipped_link") {
       await targetLinksCol.updateOne({ _id: id }, { $set: { specialty } } as any);
+    } else if (source === "synced_dialog") {
+      await (syncedCol as any).updateOne({ _id: id }, { $set: { specialty } });
     }
 
-    // Also sync specialty to TARGET_LINKS by URL (skip virtual tg:// keys)
+    // Sync specialty to TARGET_LINKS by URL (skip virtual tg:// invite hashes)
     if (!url.startsWith("tg://")) {
       await targetLinksCol.updateMany({ url }, { $set: { specialty } } as any);
     }
@@ -681,13 +732,13 @@ async function runBatchClassification(): Promise<void> {
 
   eventBus.publish({
     type: "classify_complete",
-    message: `✅ اكتمل التصنيف — ${classified.toLocaleString()} مجموعة صُنِّفت من أصل ${total.toLocaleString()}`,
+    message: `✅ اكتمل التصنيف — ${classified.toLocaleString()} مجموعة صُنِّفت من أصل ${total.toLocaleString()} (كلمات مفتاحية: ${keywordCount.toLocaleString()})`,
     total,
     classified,
     timestamp: new Date().toISOString(),
   });
 
-  logger.info({ total, classified }, "Batch specialty classification complete");
+  logger.info({ total, classified, keywordCount }, "Batch specialty classification complete");
 }
 
 // ── POST /api/links/set-specialty — manually assign specialty to a link ─────
