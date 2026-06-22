@@ -13,6 +13,7 @@ import analyticsRouter from "./analytics";
 import sessionsRouter from "./sessions";
 import inviteRequestsRouter from "./invite-requests";
 import leaveRouter from "./leave";
+import keywordsRouter from "./keywords";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,6 @@ router.use(analyticsRouter);
 router.use(sessionsRouter);
 router.use(inviteRequestsRouter);
 router.use(leaveRouter);
+router.use(keywordsRouter);
 
 export default router;

@@ -817,3 +817,66 @@ export const NORMALIZED_HARD_BLOCKED = normalizeKeywords(HARD_BLOCKED_KEYWORDS);
 export const NORMALIZED_ACADEMIC = normalizeKeywords(ACADEMIC_ONLY_KEYWORDS);
 export const NORMALIZED_NOT_MEDICAL = normalizeKeywords(NOT_MEDICAL_KEYWORDS);
 export const NORMALIZED_SOFT = normalizeKeywords(SOFT_MEDICAL_KEYWORDS);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 8 — RUNTIME CUSTOM KEYWORDS (stored in MongoDB, merged at runtime)
+// Added/removed by the user through the Keywords Manager UI.
+// Refreshed every 60 seconds + immediately after any CRUD operation.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface CustomKeywordCache {
+  strong_medical: string[];
+  hard_blocked: string[];
+  soft_medical: string[];
+  not_medical: string[];
+  lastLoadedAt: Date | null;
+}
+
+const _customCache: CustomKeywordCache = {
+  strong_medical: [],
+  hard_blocked: [],
+  soft_medical: [],
+  not_medical: [],
+  lastLoadedAt: null,
+};
+
+let _customRefreshTimer: NodeJS.Timeout | null = null;
+
+export async function refreshCustomKeywords(): Promise<void> {
+  try {
+    const { collections } = await import("@workspace/db");
+    const col = await collections.customKeywords();
+    const docs = await col.find({}).toArray();
+    const newCache: CustomKeywordCache = {
+      strong_medical: [],
+      hard_blocked: [],
+      soft_medical: [],
+      not_medical: [],
+      lastLoadedAt: new Date(),
+    };
+    for (const doc of docs) {
+      if (doc.category in newCache) {
+        (newCache[doc.category as keyof Omit<CustomKeywordCache, "lastLoadedAt">] as string[]).push(
+          doc.keyword.toLowerCase()
+        );
+      }
+    }
+    Object.assign(_customCache, newCache);
+  } catch {
+    // Non-fatal — custom keywords simply won't be applied until next refresh
+  }
+}
+
+/** Start a background refresh loop (every 60 seconds). Call once at server boot. */
+export function startCustomKeywordRefresh(): void {
+  if (_customRefreshTimer) return;
+  refreshCustomKeywords().catch(() => {});
+  _customRefreshTimer = setInterval(() => {
+    refreshCustomKeywords().catch(() => {});
+  }, 60_000);
+}
+
+/** Get the current custom keyword cache (for merging into classifiers). */
+export function getCustomKeywords(): Readonly<CustomKeywordCache> {
+  return _customCache;
+}

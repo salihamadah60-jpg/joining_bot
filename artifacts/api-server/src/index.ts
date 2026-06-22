@@ -7,6 +7,7 @@ import { cleanupIdleClients } from "./lib/clientPool";
 import { startAutoSync } from "./lib/mongoSync";
 import { startInviteRequestChecker } from "./lib/inviteRequestChecker";
 import { startLeaveEngine, startLeaveQueueProcessor } from "./lib/leaveEngine";
+import { startCustomKeywordRefresh } from "./lib/medicalKeywords";
 import { initMongo } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
@@ -139,6 +140,7 @@ async function initMongoWithRetry(attempt = 1): Promise<void> {
     startInviteRequestChecker();
     startLeaveEngine();
     await startLeaveQueueProcessor();
+    startCustomKeywordRefresh();
 
     setInterval(() => {
       cleanupIdleClients().catch((e) =>

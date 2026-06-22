@@ -24,6 +24,7 @@ import {
   GENERAL_KEYWORDS,
   NOT_MEDICAL_KEYWORDS,
   SOFT_MEDICAL_KEYWORDS,
+  getCustomKeywords,
 } from "./medicalKeywords.js";
 
 export type SpecialtyCode =
@@ -71,13 +72,22 @@ export function classifyByKeywords(
   if (!raw) return null;
   const text = raw.toLowerCase();
 
-  // Hard override: known non-medical signals
-  // (only disqualify if the title itself is clearly non-medical)
-  if (containsAny(text, NOT_MEDICAL_KEYWORDS) && !containsAny(text, [
-    "طب", "medical", "pharmacy", "nursing", "clinical", "hospital",
-    "dentist", "laborator",
-  ])) {
+  // Hard override: known non-medical signals (static + custom not_medical)
+  const customKw = getCustomKeywords();
+  const notMedicalList = [...NOT_MEDICAL_KEYWORDS, ...customKw.not_medical];
+  const safeguards = ["طب", "medical", "pharmacy", "nursing", "clinical", "hospital", "dentist", "laborator"];
+  if (containsAny(text, notMedicalList) && !containsAny(text, safeguards)) {
     return null;
+  }
+
+  // Custom hard_blocked → reject completely
+  if (customKw.hard_blocked.length > 0 && containsAny(text, customKw.hard_blocked)) {
+    return null;
+  }
+
+  // Custom strong_medical → classify as general (exact specialty unknown from custom keywords)
+  if (customKw.strong_medical.length > 0 && containsAny(text, customKw.strong_medical)) {
+    return "general";
   }
 
   // Priority classification (order matters)

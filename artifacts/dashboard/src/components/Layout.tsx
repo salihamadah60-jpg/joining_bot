@@ -11,6 +11,7 @@ import {
   Radio,
   ScanSearch,
   Clock,
+  KeyRound,
 } from "lucide-react";
 import { useHealthCheck, useGetLinksStats } from "@workspace/api-client-react";
 import { NotificationBell } from "./NotificationBell";
@@ -30,6 +31,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { name: "Channels", href: "/channels", icon: Radio },
     { name: "Review", href: "/review", icon: ScanSearch, badge: pendingReviewCount },
     { name: "Invite Requests", href: "/invite-requests", icon: Clock },
+    { name: "Keywords", href: "/keywords", icon: KeyRound },
     { name: "Analytics", href: "/analytics", icon: BarChart2 },
     { name: "Settings", href: "/settings", icon: Settings },
   ];

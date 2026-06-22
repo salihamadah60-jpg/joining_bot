@@ -30,6 +30,7 @@ import {
   NORMALIZED_STRONG,
   NORMALIZED_HARD_BLOCKED,
   NORMALIZED_ACADEMIC,
+  getCustomKeywords,
 } from "./medicalKeywords.js";
 
 /**
@@ -165,7 +166,15 @@ export async function isRelevantGroupAsync(
   description?: string | null,
   sampleMessages: string[] = []
 ): Promise<boolean | null> {
-  // 0. Hard-block check — investment/crypto/ads/excuses → always reject immediately
+  // 0. Hard-block check — static list + runtime custom hard_blocked keywords
+  const customKw = getCustomKeywords();
+  if (customKw.hard_blocked.length > 0) {
+    const combined = ((title ?? "") + " " + (description ?? "") + " " + sampleMessages.join(" ")).toLowerCase();
+    if (customKw.hard_blocked.some((kw) => combined.includes(kw))) {
+      logger.info({ title }, "Group blocked by custom hard_blocked keyword — skipping");
+      return false;
+    }
+  }
   if (isHardBlocked(title, description, sampleMessages)) {
     logger.info({ title }, "Group hard-blocked (static list) — skipping");
     return false;
@@ -191,9 +200,14 @@ export async function isRelevantGroupAsync(
   // 2. No info at all → uncertain (pending_review)
   if (!title && !description && sampleMessages.length === 0) return null;
 
-  // 3. KEYWORD CHECK — runs BEFORE AI.
+  // 3. KEYWORD CHECK — static + custom strong_medical → runs BEFORE AI.
   const kwResult = isRelevantGroup(title, description);
   if (kwResult) return true;
+  // Check custom strong_medical keywords added via Keywords Manager
+  if (customKw.strong_medical.length > 0) {
+    const combined = ((title ?? "") + " " + (description ?? "")).toLowerCase();
+    if (customKw.strong_medical.some((kw) => combined.includes(kw))) return true;
+  }
 
   // 4. Try AI classification (only for groups that keywords couldn't confirm as medical)
   if (isAiFilterEnabled()) {

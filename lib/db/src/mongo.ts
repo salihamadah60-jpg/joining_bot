@@ -206,6 +206,14 @@ export interface LeaveQueueDoc {
   processedAt: Date | null;
 }
 
+// Custom keywords — user-managed additions/exceptions stored in DB
+export interface CustomKeywordDoc {
+  _id: ObjectId;
+  keyword: string;
+  category: "strong_medical" | "hard_blocked" | "soft_medical" | "not_medical";
+  addedAt: Date;
+}
+
 // ─── Connection singleton ─────────────────────────────────────────────────────
 
 let _client: MongoClient | null = null;
@@ -266,6 +274,7 @@ export const collections = {
   syncedDialogs: () => col<SyncedDialogDoc>("synced_dialogs"),
   leftGroups: () => col<LeftGroupDoc>("left_groups"),
   leaveQueue: () => col<LeaveQueueDoc>("leave_queue"),
+  customKeywords: () => col<CustomKeywordDoc>("custom_keywords"),
 } as const;
 
 // ─── Init: create indexes + ensure bot_state singleton ───────────────────────
@@ -329,6 +338,10 @@ export async function initMongo(): Promise<void> {
   // leave_queue — persistent queue for safe sequential leaving
   await db.collection("leave_queue").createIndex({ accountPhone: 1, status: 1 });
   await db.collection("leave_queue").createIndex({ addedAt: 1 });
+
+  // custom_keywords — user-managed keyword additions
+  await db.collection("custom_keywords").createIndex({ keyword: 1 }, { unique: true });
+  await db.collection("custom_keywords").createIndex({ category: 1 });
 
   // ── Backfill: add `specialty` default to existing accounts that predate the field ──
   await db.collection("accounts").updateMany(

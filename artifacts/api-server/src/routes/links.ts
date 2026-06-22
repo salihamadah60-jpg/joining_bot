@@ -345,23 +345,17 @@ router.post("/links/reuse-joined", async (req, res): Promise<void> => {
 //    every failed/unknown link title with Gemini, and re-queues any that
 //    belong to one of the 8 medical specialties.
 router.post("/links/requeue-skipped", async (req, res): Promise<void> => {
-  const col = await collections.targetLinks();
-
-  // Step 1 — reset all skipped links instantly (existing behaviour, very fast)
-  const skippedResult = await col.updateMany(
-    { status: "skipped" },
-    { $set: { status: "pending", failReason: null, retryCount: 0, retryAfter: null, processedAt: null } }
-  );
-
-  // Respond immediately so the UI doesn't wait for the AI scan
+  // Respond immediately — the full history scan runs in the background.
+  // We do NOT blindly reset all "skipped" links here, because that would
+  // re-add recently-skipped non-medical groups back to the queue.
+  // Instead, runMedicalRequeueFromHistory() reads the FULL join history and
+  // re-adds ONLY groups that pass the medical keyword classifier.
   res.json({
     ok: true,
-    immediate: skippedResult.modifiedCount,
     background: true,
-    message: `تمت إعادة ${skippedResult.modifiedCount.toLocaleString()} رابط مُتجاهَل فوراً — جارٍ فحص السجل الكامل بالذكاء الاصطناعي في الخلفية...`,
+    message: "جاري فحص السجل الكامل — سيتم إعادة الروابط الطبية فقط إلى قائمة الانتظار...",
   });
 
-  // Step 2 — background AI scan (fire-and-forget)
   runMedicalRequeueFromHistory().catch((err) => {
     eventBus.publish({
       type: "requeue_error",

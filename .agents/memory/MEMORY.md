@@ -1,6 +1,6 @@
 - [Telegram Bot Manager Setup](telegram-bot-setup.md) — MongoDB-only architecture, MemoryStorage for Telegram sessions, no PostgreSQL/SQLite/Drizzle
 - [API Server Fast Startup](api-server-startup.md) — use `pnpm exec tsx src/index.ts` for dev; never rebuild with esbuild on every start
-- [Leave Engine Architecture](leave-engine.md) — separate leaveEngine.ts independent from join engine; leaveTick() GATED behind auto_leave_enabled setting (default: false/disabled)
+- [Leave Engine Architecture](leave-engine.md) — leaveTick() does prefetch ONLY (no auto-leave); all leaving is manual; no auto-queue after join; reactivate from channels_limit after any successful leave
 - [Keyword False Positive Fix](keyword-false-positive.md) — custom blocked keywords now use matchesWordBoundary() (Unicode regex) — prevents "ME" blocking "medicine"/"prometric"
 - [Session Protection Rules](session-protection.md) — 5 hard rules to prevent involuntary re-auth; never wipe sessionString except on banned accounts
 - [AI Specialty Routing](ai-specialty-routing.md) — Gemini batch classifier (20/call); internal collections auto-created per specialty; post-join classification is fire-and-fire IIFE

@@ -130,12 +130,6 @@ async function fetchLeaveQueueStatus(phone: string): Promise<{
   return r.json();
 }
 
-async function triggerAutoCleanup(phone: string) {
-  const r = await fetch(`/api/leave/auto-cleanup/${encodeURIComponent(phone)}`, { method: "POST" });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
 async function rejoinUrls(urls: string[]) {
   const r = await fetch("/api/leave/rejoin", {
     method: "POST",
@@ -289,20 +283,6 @@ function LeaveManagerTab() {
     onError: (e: any) => toast({ title: "خطأ في الاتصال", description: e.message, variant: "destructive" }),
   });
 
-  const autoCleanupMutation = useMutation({
-    mutationFn: () => triggerAutoCleanup(selectedPhone),
-    onSuccess: (data) => {
-      toast({
-        title: "اكتمل التنظيف التلقائي",
-        description: `فُحص: ${data.checked} | غادر: ${data.left} | إعادة تفعيل: ${data.reactivated ? "نعم ✅" : "لا"}`,
-      });
-      refetchDialogs();
-      qc.invalidateQueries({ queryKey: ["/api/accounts"] });
-      qc.invalidateQueries({ queryKey: ["/api/leave/history"] });
-    },
-    onError: (e: any) => toast({ title: "خطأ", description: e.message, variant: "destructive" }),
-  });
-
   const queueMutation = useMutation({
     mutationFn: ({ groups, reason }: { groups: Dialog[]; reason: string }) =>
       addToLeaveQueue(selectedPhone, groups, reason),
@@ -446,20 +426,10 @@ function LeaveManagerTab() {
             )}
 
             {isChannelsLimit && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => autoCleanupMutation.mutate()}
-                disabled={autoCleanupMutation.isPending}
-                className="font-mono gap-2 border-orange-500/50 text-orange-400 hover:bg-orange-500/10"
-              >
-                {autoCleanupMutation.isPending ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Zap className="w-3.5 h-3.5" />
-                )}
-                تنظيف تلقائي
-              </Button>
+              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-orange-500/40 bg-orange-950/20 text-orange-400 text-xs font-mono">
+                <Zap className="w-3 h-3" />
+                الحساب ممتلئ — حدِّد المجموعات يدوياً ثم اضغط مغادرة
+              </span>
             )}
           </>
         )}

@@ -213,28 +213,13 @@ async function tick(): Promise<void> {
       }
     }
 
-    // Filter out accounts that have hit or are near their channels cap.
-    // Hard limit: 500 (regular) / 1000 (Premium). We stop 10 before the wall
-    // so there is always a small buffer before CHANNELS_TOO_MUCH hits.
-    // Accounts already marked channels_limit are excluded by the { status: "active" }
-    // query above, but some may have an accurate channelsCount even before the error.
+    // Filter out accounts that have hit their daily limit.
+    // NOTE: channels_limit status is set ONLY when Telegram returns CHANNELS_TOO_MUCH —
+    // there are no internal hardcoded channel count limits. Telegram itself is the source
+    // of truth. Accounts already marked channels_limit are excluded by the { status: "active" }
+    // query above.
     const usable = allActive.filter((acc) => {
       if ((acc.joinedToday ?? 0) >= (acc.dailyLimit ?? DAILY_LIMIT)) return false;
-      const channelsCap = acc.isPremium ? 990 : 490;
-      if ((acc.channelsCount ?? 0) >= channelsCap) {
-        // Mark proactively so the engine skips it until leave-engine frees space
-        accountsCol.updateOne(
-          { _id: acc._id },
-          { $set: { status: "channels_limit", updatedAt: new Date() } }
-        ).catch(() => {});
-        eventBus.publish({
-          type: "channels_limit",
-          message: `⛔ الحساب ${acc.phone} وصل لحد القنوات (${acc.channelsCount}/${channelsCap + 10}) — سيُستأنف تلقائياً عند إفراغ مساحة`,
-          accountPhone: acc.phone,
-          timestamp: new Date().toISOString(),
-        });
-        return false;
-      }
       return true;
     });
 
@@ -630,27 +615,10 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
     await logActivity("join_success", msg, account.phone, link.url);
     await logJoinJob(account.phone, link.url, "success");
 
-    // ── 12. Account Specialization: auto-leave off-topic groups ──────────────
-    if (relevant === false && account.specialty && account.specialty !== "all" && account.specialty !== "channels_only") {
-      addToLeaveQueue(
-        account.phone,
-        [{ url: link.url, chatId: chatId ? String(chatId) : undefined, title: groupTitle ?? undefined, chatType: groupType ?? undefined }],
-        `auto-specialty:${account.specialty}`
-      ).catch((e) => logger.warn({ phone: account.phone, err: e }, "Specialty auto-queue failed"));
-    }
-
-    // ── 13. channels_only: queue non-channel entities for cleanup ────────────
-    if (account.specialty === "channels_only" && groupType) {
-      const isChannel = /channel|broadcast/i.test(groupType);
-      if (!isChannel) {
-        logger.info({ phone: account.phone, url: link.url, groupType }, "channels_only: joined a group (not a channel) — queuing for cleanup");
-        addToLeaveQueue(
-          account.phone,
-          [{ url: link.url, chatId: chatId ? String(chatId) : undefined, title: groupTitle ?? undefined, chatType: groupType ?? undefined }],
-          "channels_only:not_a_channel"
-        ).catch((e) => logger.warn({ phone: account.phone, err: e }, "channels_only auto-queue failed"));
-      }
-    }
+    // NOTE: No automatic leave-queueing here.
+    // The user manually selects groups to leave from the Channels page.
+    // Off-topic joins are simply recorded in the activity log — the user
+    // decides whether to leave them.
 
     return relevant === true;
   } catch (err) {

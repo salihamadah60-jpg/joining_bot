@@ -15,6 +15,7 @@ import Analytics from "@/pages/Analytics";
 import Channels from "@/pages/Channels";
 import Review from "@/pages/Review";
 import InviteRequests from "@/pages/InviteRequests";
+import Keywords from "@/pages/Keywords";
 
 const queryClient = new QueryClient();
 
@@ -30,6 +31,7 @@ function Router() {
         <Route path="/channels" component={Channels} />
         <Route path="/review" component={Review} />
         <Route path="/invite-requests" component={InviteRequests} />
+        <Route path="/keywords" component={Keywords} />
         <Route path="/settings" component={Settings} />
         <Route path="/analytics" component={Analytics} />
         <Route component={NotFound} />

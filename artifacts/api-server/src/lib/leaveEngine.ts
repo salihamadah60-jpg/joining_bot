@@ -195,22 +195,26 @@ export async function leaveGroupsBatch(
     await sleep(1500 + Math.random() * 2000);
   }
 
-  // After leaving, check if account can resume joining
-  const updated = await accountsCol.findOne({ phone });
-  if (updated && updated.status === "channels_limit" && (updated.channelsCount ?? 500) < 450) {
-    await accountsCol.updateOne(
-      { phone },
-      { $set: { status: "active", updatedAt: new Date() } }
-    );
-    const reactivateMsg = `✅ تم تفعيل الحساب ${phone} — المساحة متاحة للانضمام من جديد`;
-    await logLeaveActivity(reactivateMsg, phone, "");
-    eventBus.publish({
-      type: "account_reactivated",
-      message: reactivateMsg,
-      accountPhone: phone,
-      timestamp: new Date().toISOString(),
-    });
-    logger.info({ phone }, "Account reactivated after group cleanup");
+  // After leaving, if account was channels_limit and we successfully freed space,
+  // set it back to active. Telegram — not internal counters — will re-set it to
+  // channels_limit on the next join attempt if it's still full.
+  if (success > 0) {
+    const updated = await accountsCol.findOne({ phone });
+    if (updated && updated.status === "channels_limit") {
+      await accountsCol.updateOne(
+        { phone },
+        { $set: { status: "active", updatedAt: new Date() } }
+      );
+      const reactivateMsg = `✅ تم تفعيل الحساب ${phone} — تم تحرير ${success} مجموعة، جاهز للانضمام من جديد`;
+      await logLeaveActivity(reactivateMsg, phone, "");
+      eventBus.publish({
+        type: "account_reactivated",
+        message: reactivateMsg,
+        accountPhone: phone,
+        timestamp: new Date().toISOString(),
+      });
+      logger.info({ phone, freed: success }, "Account reactivated after manual group cleanup");
+    }
   }
 
   return { success, failed, results };
@@ -476,6 +480,23 @@ async function processNextQueueItem(phone: string): Promise<void> {
       timestamp: new Date().toISOString(),
     });
 
+    // If account was channels_limit, reactivate it so the engine can
+    // try joining again. Telegram will re-set channels_limit if still full.
+    const updatedAcc = await accountsCol.findOne({ phone });
+    if (updatedAcc && updatedAcc.status === "channels_limit") {
+      await accountsCol.updateOne(
+        { phone },
+        { $set: { status: "active", updatedAt: new Date() } }
+      );
+      eventBus.publish({
+        type: "account_reactivated",
+        message: `✅ تم تفعيل الحساب ${phone} بعد مغادرة مجموعة من الطابور`,
+        accountPhone: phone,
+        timestamp: new Date().toISOString(),
+      });
+      logger.info({ phone }, "Account reactivated after queue leave");
+    }
+
   } else {
     const errorMsg = result.error ?? "unknown error";
 
@@ -524,40 +545,19 @@ function scheduleLeaveTick(delayMs: number): void {
 }
 
 async function leaveTick(): Promise<void> {
-  // ── Guard: auto-leave must be explicitly enabled by the user ─────────────────
-  try {
-    const { getSettings } = await import("@workspace/db");
-    const kv = await getSettings();
-    if (kv["auto_leave_enabled"] !== "true") {
-      logger.debug("Auto-leave is DISABLED — skipping cleanup tick (enable from Settings → Auto-Leave)");
-      return;
-    }
-  } catch {
-    logger.debug("Could not read auto_leave_enabled — skipping cleanup as safe default");
-    return;
-  }
+  // This tick NO LONGER performs automatic group leaving.
+  // Leaving groups is a MANUAL operation — the user selects groups on the
+  // Channels page and triggers leave themselves.
+  //
+  // The tick is kept for the prefetch job only: use channels_limit accounts
+  // (which are full and can't join anyway) to pre-resolve pending link titles,
+  // allowing non-relevant links to be skipped before active accounts waste
+  // their daily quota on them.
 
   const accountsCol = await collections.accounts();
   const limitAccounts = await accountsCol.find({ status: "channels_limit" }).toArray();
-
   if (limitAccounts.length === 0) return;
 
-  logger.info({ count: limitAccounts.length }, "Leave engine: processing channels_limit accounts");
-
-  for (const acc of limitAccounts) {
-    if (!acc.sessionString) continue;
-    try {
-      const result = await autoCleanupAccount(acc.phone);
-      logger.info(result, `Leave engine: cleanup done for ${acc.phone}`);
-    } catch (e) {
-      logger.warn({ phone: acc.phone, err: e }, "Leave engine: cleanup failed for account");
-    }
-    // Pause between accounts
-    await sleep(5000);
-  }
-
-  // After cleanup, use channels_limit accounts to pre-filter pending username links
-  // This avoids wasting active accounts' daily join quota on irrelevant groups.
   for (const acc of limitAccounts) {
     if (!acc.sessionString) continue;
     try {
