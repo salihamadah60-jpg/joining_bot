@@ -330,6 +330,38 @@ const GENERAL: string[] = [
   "IMD ", " IMD", "imd exam",    // Internal Medicine / specialty
   "home care",
   "تلطيفي", "رعاية ملطفة",
+
+  // ── UK Royal College exams (previously missing → false negatives) ──
+  "plab",                        // Professional and Linguistic Assessments Board
+  "mrcp",                        // Membership of Royal College of Physicians
+  "mrcgp",                       // Royal College of General Practitioners
+  "mrcem",                       // Royal College of Emergency Medicine
+  "mrpch",                       // Royal College of Paediatrics and Child Health
+  "mrcpsych",                    // Royal College of Psychiatrists
+
+  // ── Public health / Community health ──
+  "public health", "community health",
+  "صحة عامة", "الصحة العامة",
+  "صحة مجتمع", "صحة المجتمع",
+  "community nursing", "public health nursing",
+  "تمريض مجتمع", "تمريض مجتمعي",
+  "health promotion",
+
+  // ── Microbiology (Arabic) ──
+  "احياء دقيقة", "أحياء دقيقة", "الاحياء الدقيقة",
+
+  // ── Medical drugs / pharmacotherapy ──
+  "ivermectin", "fenbendazole", "antiparasitic",
+  "dosing", "drug dosing",
+
+  // ── Biomedical / allied health ──
+  "biomedical", "biomed",
+  "health informatics",
+  "paramedic", "paramedics",
+
+  // ── Nutrition / Dietetics ──
+  "nutrition", "dietitian", "dietetics",
+  "تغذية", "أخصائي تغذية",
 ];
 
 // ── Not-medical override (wins only when NO specialty pattern matched) ─────────

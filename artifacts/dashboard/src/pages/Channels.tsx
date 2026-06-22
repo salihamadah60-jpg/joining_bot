@@ -851,21 +851,26 @@ function LeaveHistoryTab() {
       toast({ title: "خطأ", description: e.message, variant: "destructive" }),
   });
 
+  // Only re-queue items classified as medical or probably_medical — never dump all
+  const medicalRawItems = rawItems.filter(
+    (i) => !!i.url && (i.classification === "medical" || i.classification === "probably_medical")
+  );
+
   const requeueAllMutation = useMutation({
     mutationFn: async () => {
-      const allWithUrl = rawItems.filter((i) => !!i.url);
+      if (medicalRawItems.length === 0) throw new Error("لا توجد مجموعات طبية قابلة للإعادة");
       const r = await fetch("/api/leave/rejoin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ urls: allWithUrl.map((i) => i.url) }),
+        body: JSON.stringify({ urls: medicalRawItems.map((i) => i.url) }),
       });
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     },
     onSuccess: (result) => {
       toast({
-        title: "✅ إعادة إدراج المغادرات",
-        description: `أُضيف: ${result.added} | موجود: ${result.skipped}`,
+        title: "✅ إعادة إدراج المجموعات الطبية",
+        description: `أُضيف: ${result.added} | موجود مسبقاً: ${result.skipped} | مُصفّى (غير طبي): ${result.filteredOut ?? 0}`,
       });
       qc.invalidateQueries({ queryKey: ["/api/links"] });
     },
@@ -927,16 +932,17 @@ function LeaveHistoryTab() {
           {rawItems.length.toLocaleString()} / {total.toLocaleString()} مغادرة
         </span>
 
-        {/* Re-add all */}
+        {/* Re-add all — medical/probably_medical only */}
         <Button
           variant="outline"
           size="sm"
           onClick={() => requeueAllMutation.mutate()}
-          disabled={requeueAllMutation.isPending || rawItems.filter((i) => !!i.url).length === 0}
+          disabled={requeueAllMutation.isPending || medicalRawItems.length === 0}
           className="font-mono gap-2 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+          title="يُعيد إدراج الطبية والشبه طبية فقط — يتجاهل غير الطبي تلقائياً"
         >
           {requeueAllMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-          إعادة إدراج الكل ({rawItems.filter((i) => !!i.url).length})
+          إعادة إدراج الطبية ({medicalRawItems.length})
         </Button>
 
         {/* Re-add selected */}

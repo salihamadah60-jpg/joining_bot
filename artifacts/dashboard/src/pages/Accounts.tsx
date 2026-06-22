@@ -1009,6 +1009,7 @@ export default function Accounts() {
                   <option value="laboratory">مختبرات طبية</option>
                   <option value="pharmacy">صيدلة</option>
                   <option value="exams">ابتعاث (اختبارات وشهادات)</option>
+                  <option value="invite_acceptance">🔗 روابط الدعوة والقبول</option>
                   <option value="channels_only">📢 القنوات الطبية فقط</option>
                 </select>
                 <p className="text-xs text-muted-foreground">
@@ -1237,6 +1238,7 @@ export default function Accounts() {
                             <option value="laboratory">مختبرات طبية</option>
                             <option value="pharmacy">صيدلة</option>
                             <option value="exams">ابتعاث (اختبارات وشهادات)</option>
+                            <option value="invite_acceptance">🔗 روابط الدعوة والقبول</option>
                             <option value="channels_only">📢 القنوات الطبية فقط</option>
                           </select>
 
@@ -1244,7 +1246,7 @@ export default function Accounts() {
                           {(() => {
                             const PREDEFINED = [
                               "all","general","dentistry","nursing","anesthesia",
-                              "laboratory","pharmacy","exams","channels_only",
+                              "laboratory","pharmacy","exams","invite_acceptance","channels_only",
                               // legacy detailed codes — keep so existing accounts aren't flagged as "custom"
                               "internal","surgery","pediatrics","gynecology","psychiatry","orthopedics",
                               "cardiology","neurology","dermatology","oncology","urology","ent",

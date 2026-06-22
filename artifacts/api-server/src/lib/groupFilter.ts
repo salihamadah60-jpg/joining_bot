@@ -186,18 +186,23 @@ export async function isRelevantGroupAsync(
   // 2. No info at all → uncertain (pending_review)
   if (!title && !description && sampleMessages.length === 0) return null;
 
-  // 3. Try AI classification
+  // 3. KEYWORD CHECK — runs BEFORE AI.
+  // Strong medical keyword match → return true IMMEDIATELY.
+  // Keywords always win: if a title like "MRCP part 1", "pharmacy", "تمريض" matches,
+  // no AI call is needed and AI cannot override this decision.
+  const kwResult = isRelevantGroup(title, description);
+  if (kwResult) return true;
+
+  // 4. Try AI classification (only for groups that keywords couldn't confirm as medical)
   if (isAiFilterEnabled()) {
     const aiResult = await aiClassifyGroup(title, sampleMessages);
     if (aiResult !== null) return aiResult;
-    // AI returned null (unavailable/error) — fall through to keywords
-    const kwResult = isRelevantGroup(title, description);
-    if (!kwResult) return null;
-    return kwResult;
+    // AI returned null (unavailable/error) — mark uncertain for pending_review
+    return null;
   }
 
-  // 4. Keyword-only (no AI)
-  return isRelevantGroup(title, description);
+  // 5. Keyword-only path (AI disabled): keywords returned false → not in scope
+  return false;
 }
 
 /**
@@ -350,6 +355,30 @@ const STRONG_MEDICAL_KEYWORDS = [
   "mrcs",    // membership of royal college of surgeons
   "frcr",    // fellow of royal college of radiologists
   "cbc",     // complete blood count
+  // ── UK Royal College / licensing exams (commonly missing = false negatives) ──
+  "plab",    // professional and linguistic assessments board (UK)
+  "mrcp",    // membership of royal college of physicians
+  "mrcgp",   // membership of royal college of general practitioners
+  "mrcem",   // membership of royal college of emergency medicine
+  "mrpch",   // membership of royal college of paediatrics and child health
+  "mrcpsych",// membership of royal college of psychiatrists
+  // ── Arabic: Public health / Community health ──
+  "صحة عامة", "الصحة العامة",
+  "صحة مجتمع", "صحة المجتمع",
+  "تمريض مجتمع", "تمريض مجتمعي",
+  // ── Arabic: Microbiology (احياء دقيقة) ──
+  "احياء دقيقة", "أحياء دقيقة", "الاحياء الدقيقة",
+  // ── Medical drugs & pharmacology (specific = strong medical signal) ──
+  "ivermectin", "fenbendazole", "antiparasitic",
+  "dosing", "drug dosing",
+  // ── English: Community / Public health ──
+  "community health", "public health",
+  "community nursing", "public health nursing",
+  "health promotion",
+  // ── Biomedical / Health informatics ──
+  "biomedical", "biomed",
+  "health informatics",
+  "paramedic", "paramedics",
   // ── Pharmacy / clinical ──
   "pharmacology", "pharmaceutical",
   // ── Health specialties keywords (common in Saudi group naming) ──

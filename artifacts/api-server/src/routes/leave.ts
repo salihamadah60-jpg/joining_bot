@@ -21,7 +21,7 @@ import {
 } from "../lib/leaveEngine.js";
 import type { LeaveTarget } from "../lib/leaveEngine.js";
 import { classifyGroupQuick } from "../lib/groupFilter.js";
-import { classifyGroupConfidence } from "../lib/keywordSpecialtyClassifier.js";
+import { classifyGroupConfidence, classifyByKeywords } from "../lib/keywordSpecialtyClassifier.js";
 
 const router: IRouter = Router();
 
@@ -117,30 +117,62 @@ router.get("/leave/history", async (req, res): Promise<void> => {
 });
 
 // ── POST /api/leave/rejoin — re-add left URLs back to join queue ──────────────
+// Server-side medical safety filter: look up title from left_groups and verify
+// the group is medical or probably_medical before re-queuing.
 router.post("/leave/rejoin", async (req, res): Promise<void> => {
   try {
-    const { urls } = req.body as { urls: string[] };
+    const { urls, skipMedicalFilter } = req.body as {
+      urls: string[];
+      skipMedicalFilter?: boolean; // admin override; default false
+    };
     if (!Array.isArray(urls) || urls.length === 0) {
       res.status(400).json({ error: "urls array required" });
       return;
     }
 
     const targetLinksCol = await collections.targetLinks();
+    const leftCol = await collections.leftGroups();
+
+    // Build a title-lookup map from left_groups for the submitted URLs
+    const leftDocs = await leftCol
+      .find({ url: { $in: urls } }, { projection: { url: 1, title: 1 } })
+      .toArray();
+    const titleByUrl = new Map<string, string | null>();
+    for (const d of leftDocs) titleByUrl.set(d.url, d.title ?? null);
+
     let added = 0;
     let skipped = 0;
+    let filteredOut = 0;
 
     for (const url of urls) {
       if (!url || typeof url !== "string") continue;
+
+      // ── Medical gate (server-side safety net) ────────────────────────────────
+      if (!skipMedicalFilter) {
+        const title = titleByUrl.get(url) ?? null;
+        const conf = classifyGroupConfidence(title, url);
+        if (conf === "non_medical") {
+          // Hard non-medical — never re-queue
+          filteredOut++;
+          continue;
+        }
+        if (conf === "uncertain") {
+          // Uncertain with no specialty keyword — also skip
+          const specialty = classifyByKeywords(title, url);
+          if (!specialty) {
+            filteredOut++;
+            continue;
+          }
+        }
+      }
 
       // Check if URL already exists in the target links collection
       const existing = await targetLinksCol.findOne({ url });
 
       if (existing) {
         if (existing.status === "pending" || existing.status === "joined") {
-          // Already queued or already joined — skip
           skipped++;
         } else {
-          // Was failed/skipped — reset to pending so it gets retried
           await targetLinksCol.updateOne(
             { url },
             {
@@ -157,14 +189,13 @@ router.post("/leave/rejoin", async (req, res): Promise<void> => {
           added++;
         }
       } else {
-        // New URL — insert fresh
         try {
           await targetLinksCol.insertOne({
             _id: new ObjectId(),
             url,
             status: "pending",
             failReason: null,
-            groupTitle: null,
+            groupTitle: titleByUrl.get(url) ?? null,
             groupType: null,
             source: "rejoin",
             usedByAccountPhone: null,
@@ -180,7 +211,7 @@ router.post("/leave/rejoin", async (req, res): Promise<void> => {
       }
     }
 
-    res.json({ added, skipped });
+    res.json({ added, skipped, filteredOut });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
