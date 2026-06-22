@@ -62,6 +62,7 @@ router.put("/settings", async (req, res): Promise<void> => {
     "mongo_backup_url",
     "mongo_backup_db",
     "auto_leave_enabled",
+    "auto_verify_enabled",
     "custom_blocked_keywords",
   ]);
 

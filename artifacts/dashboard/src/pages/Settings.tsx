@@ -160,6 +160,9 @@ export default function Settings() {
   // AI filter
   const [aiFilterEnabled, setAiFilterEnabled] = useState(false);
 
+  // Auto-verify challenge handler
+  const [autoVerifyEnabled, setAutoVerifyEnabled] = useState(true);
+
   // Schedule — user picks both START and END times freely (no auto-calculation)
   const [startHour12, setStartHour12] = useState(8);
   const [startAmPm, setStartAmPm] = useState<"AM" | "PM">("AM");
@@ -256,6 +259,7 @@ export default function Settings() {
       setApiId(s["telegram_api_id"] ?? "");
       setAutoSyncInterval(s["auto_sync_interval_minutes"] ?? "30");
       setAiFilterEnabled(s["ai_filter_enabled"] === "true");
+      setAutoVerifyEnabled(s["auto_verify_enabled"] !== "false"); // default ON
       setMongoBackupUrl(s["mongo_backup_url"] ?? "");
       setMongoBackupDb(s["mongo_backup_db"] ?? "tg_backup");
 
@@ -352,6 +356,20 @@ export default function Settings() {
           refetchSettings();
         },
         onError: () => { setAiFilterEnabled(!enabled); toast({ title: "خطأ", variant: "destructive" }); },
+      }
+    );
+  };
+
+  const handleToggleAutoVerify = (enabled: boolean) => {
+    setAutoVerifyEnabled(enabled);
+    updateSettings.mutate(
+      { data: { auto_verify_enabled: String(enabled) } },
+      {
+        onSuccess: () => {
+          toast({ title: enabled ? "✅ التحقق التلقائي مُفعَّل" : "🔕 التحقق التلقائي معطَّل" });
+          refetchSettings();
+        },
+        onError: () => { setAutoVerifyEnabled(!enabled); toast({ title: "خطأ", variant: "destructive" }); },
       }
     );
   };
@@ -772,6 +790,37 @@ export default function Settings() {
             {aiFilterEnabled && (
               <div className="mt-3 text-xs text-primary bg-primary/5 border border-primary/20 rounded-md px-3 py-2">
                 ✅ Gemini نشط — كل مجموعة جديدة ستُعرض للتصنيف قبل الانضمام
+              </div>
+            )}
+          </div>
+
+          {/* Auto Verification Handler */}
+          <div className="bg-card border border-border rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-1.5 rounded-md ${autoVerifyEnabled ? "bg-emerald-500/10 border border-emerald-500/20" : "bg-muted border border-border"}`}>
+                  <ShieldCheck className={`w-4 h-4 ${autoVerifyEnabled ? "text-emerald-400" : "text-muted-foreground"}`} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-foreground">التحقق التلقائي</p>
+                  <p className="text-xs text-muted-foreground">
+                    {autoVerifyEnabled
+                      ? "يُجيب تلقائياً على تحديات البوتات بعد الانضمام"
+                      : "يُتجاهل طلبات التحقق من بوتات المجموعات"}
+                  </p>
+                </div>
+              </div>
+              <Switch checked={autoVerifyEnabled} onCheckedChange={handleToggleAutoVerify} disabled={updateSettings.isPending} />
+            </div>
+            {autoVerifyEnabled && (
+              <div className="mt-3 space-y-1 text-xs text-emerald-400 bg-emerald-500/5 border border-emerald-500/20 rounded-md px-3 py-2">
+                <p className="font-medium mb-1">✅ نشط — يعالج تلقائياً:</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-emerald-300/80">
+                  <span>🔘 الضغط على أزرار التحقق</span>
+                  <span>✏️ إرسال كلمة التحقق</span>
+                  <span>🔢 حل العمليات الحسابية</span>
+                  <span>⚡ أوامر /start التلقائية</span>
+                </div>
               </div>
             )}
           </div>

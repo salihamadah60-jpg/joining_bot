@@ -39,6 +39,7 @@ import { getClient, removeClient } from "./clientPool.js";
 import { addToLeaveQueue } from "./leaveEngine.js";
 import { getDeviceProfileForPhone } from "./deviceProfiles.js";
 import { eventBus } from "./eventBus.js";
+import { handleVerificationChallenge } from "./verificationHandler.js";
 
 const MAX_RETRY_COUNT = 3;
 const RETRY_DELAY_MS = 60 * 60 * 1000;
@@ -530,6 +531,19 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
         await logActivity("join_failed", `🚫 محظور (بعد الانضمام): ${groupTitle} — ${blockedKw}`, account.phone, link.url, `BLOCKED_POST:${blockedKw}`);
         await logJoinJob(account.phone, link.url, "failed", `BLOCKED_POST:${blockedKw}`, "مجموعة محظورة (فحص بعد الانضمام) — تم الخروج");
         return false;
+      }
+    }
+
+    // ── 7a. Verification challenge handler (fire-and-forget, non-blocking) ──
+    // Runs concurrently with observeGroupAfterJoin. Detects bot challenges
+    // (inline button / keyword / math) and responds automatically.
+    if (chatId) {
+      const settingsKvVerify = await getSettings();
+      const verifyEnabled = settingsKvVerify["auto_verify_enabled"] !== "false"; // default ON
+      if (verifyEnabled) {
+        handleVerificationChallenge(client, chatId, link.url, account.phone).catch((e) =>
+          logger.debug({ e: String(e?.message ?? e) }, "[VERIFY] Background handler error")
+        );
       }
     }
 
