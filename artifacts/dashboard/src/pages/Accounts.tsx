@@ -921,12 +921,19 @@ export default function Accounts() {
     mutationFn: async (id: string) => {
       const r = await fetch(`/api/accounts/${id}/sync-dialogs`, { method: "POST" });
       if (!r.ok) throw new Error(await r.text());
-      return r.json();
+      return r.json() as Promise<{ channelsCount: number; phone?: string; synced: boolean }>;
     },
     onSuccess: (data, id) => {
       invalidate();
       setSyncingId(null);
-      toast({ title: "✅ تم مزامنة عدد القنوات", description: `العدد الحقيقي: ${data.channelsCount}` });
+      // Invalidate the synced-dialogs query for this account so the panel refreshes
+      const account = accounts?.find((a) => a.id === id);
+      if (account?.phone) {
+        queryClient.invalidateQueries({
+          queryKey: [`/api/accounts/${encodeURIComponent(account.phone)}/synced-dialogs`],
+        });
+      }
+      toast({ title: "✅ تمت المزامنة", description: `تم جلب ${data.channelsCount} مجموعة/قناة من تيليجرام` });
     },
     onError: (e: any, id) => {
       setSyncingId(null);

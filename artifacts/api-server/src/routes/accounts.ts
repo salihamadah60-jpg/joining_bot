@@ -288,11 +288,20 @@ router.post("/accounts/:id/sync-dialogs", async (req, res): Promise<void> => {
     await fetchFolder(0);
     await fetchFolder(1).catch(() => {}); // archived folder may not exist — ignore errors
 
+    // Deduplicate allChats by chatId (same chat may appear in multiple folders)
+    const seenChatIds = new Set<string>();
+    const uniqueChats = allChats.filter((c: any) => {
+      const chatId = String(c?.id ?? "");
+      if (!chatId || seenChatIds.has(chatId)) return false;
+      seenChatIds.add(chatId);
+      return true;
+    });
+
     // Replace all synced data for this account
     await syncedCol.deleteMany({ accountPhone: account.phone });
 
-    if (allChats.length > 0) {
-      const docs = allChats.map((c: any) => {
+    if (uniqueChats.length > 0) {
+      const docs = uniqueChats.map((c: any) => {
         const chatId = String(c?.id ?? "");
         const title: string | null = c?.title ?? null;
         const username: string | null = c?.username ?? null;
@@ -313,10 +322,10 @@ router.post("/accounts/:id/sync-dialogs", async (req, res): Promise<void> => {
       });
 
       await syncedCol.insertMany(docs, { ordered: false }).catch(() => {});
-      count = allChats.length;
+      count = uniqueChats.length;
     }
 
-    logger.info({ phone: account.phone, count, pages: page + 1 }, "Dialog sync complete via MTProto");
+    logger.info({ phone: account.phone, count, folders: 2 }, "Dialog sync complete via MTProto");
   } catch (err) {
     logger.warn({ err, phone: account.phone }, "messages.getDialogs failed — falling back to JOINED count");
     try {
