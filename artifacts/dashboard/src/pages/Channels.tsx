@@ -233,6 +233,120 @@ function LeaveResultsPanel({
   );
 }
 
+// ─── Leave Queue Panel (expandable, with clear button) ───────────────────────
+
+function LeaveQueuePanel({
+  queueStatus,
+  selectedPhone,
+  onRefetch,
+  onCleared,
+}: {
+  queueStatus: { pending: number; processing: number; done: number; failed: number; items: { id: string; title: string | null; chatId?: string; url?: string | null; status: string; addedAt: string; errorMessage: string | null }[] };
+  selectedPhone: string;
+  onRefetch: () => void;
+  onCleared: () => void;
+}) {
+  const { toast } = useToast();
+  const [expanded, setExpanded] = useState(false);
+
+  const clearMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/leave/queue/${encodeURIComponent(selectedPhone)}`, { method: "DELETE" });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    onSuccess: (data: any) => {
+      toast({ title: "✅ تم مسح طابور المغادرة", description: `حُذف ${data.deleted ?? 0} عنصر معلق` });
+      onCleared();
+    },
+    onError: (e: any) => toast({ title: "خطأ", description: e.message, variant: "destructive" }),
+  });
+
+  const visibleItems = expanded ? queueStatus.items : queueStatus.items.slice(0, 5);
+  const hiddenCount = queueStatus.items.length - 5;
+
+  return (
+    <Card className="border-orange-500/30 bg-orange-950/20">
+      <CardContent className="p-3">
+        {/* Header row */}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2 text-xs font-mono text-orange-300">
+            <Clock className="w-3.5 h-3.5" />
+            <span>طابور المغادرة</span>
+            {queueStatus.processing > 0 && (
+              <span className="flex items-center gap-1 text-yellow-400">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                يعالج {queueStatus.processing}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-xs font-mono">
+            {queueStatus.pending > 0 && <span className="text-orange-400">⏳ {queueStatus.pending} معلق</span>}
+            {queueStatus.failed > 0 && <span className="text-red-400">❌ {queueStatus.failed} فشل</span>}
+            <button onClick={onRefetch} className="text-muted-foreground hover:text-foreground transition-colors" title="تحديث">
+              <RefreshCw className="w-3 h-3" />
+            </button>
+            {/* Clear queue button */}
+            {queueStatus.pending > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => clearMutation.mutate()}
+                disabled={clearMutation.isPending}
+                className="h-5 px-2 text-[10px] font-mono text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-1"
+                title="مسح جميع العناصر المعلقة من الطابور"
+              >
+                {clearMutation.isPending ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Trash2 className="w-2.5 h-2.5" />}
+                مسح الطابور
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Items list */}
+        <div className="space-y-0.5">
+          {visibleItems.map((item) => (
+            <div key={item.id} className="text-xs font-mono text-muted-foreground py-1 flex items-start gap-2 border-b border-orange-500/10 last:border-0">
+              {item.status === "processing" ? (
+                <Loader2 className="w-3 h-3 animate-spin text-yellow-400 flex-shrink-0 mt-0.5" />
+              ) : item.status === "failed" ? (
+                <XCircle className="w-3 h-3 text-red-400 flex-shrink-0 mt-0.5" />
+              ) : (
+                <Clock className="w-3 h-3 text-orange-400/60 flex-shrink-0 mt-0.5" />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="truncate text-foreground/80">{item.title ?? item.url ?? item.chatId ?? item.id}</div>
+                {item.errorMessage && (
+                  <div className="text-red-400/70 text-[10px] truncate mt-0.5">
+                    {item.errorMessage.includes("No username") ? "لا رابط متاح (مجموعة خاصة)" : item.errorMessage.slice(0, 80)}
+                  </div>
+                )}
+                {item.url && (
+                  <div className="text-muted-foreground/50 text-[10px] truncate">{item.url.replace("https://t.me/", "@")}</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Show more / collapse toggle */}
+        {queueStatus.items.length > 5 && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="mt-2 w-full text-[10px] font-mono text-orange-400/70 hover:text-orange-300 transition-colors flex items-center justify-center gap-1"
+          >
+            {expanded ? (
+              <><ChevronUp className="w-3 h-3" /> إخفاء ({queueStatus.items.length - 5} مخفي)</>
+            ) : (
+              <><ChevronDown className="w-3 h-3" /> عرض {hiddenCount} عنصر آخر</>
+            )}
+          </button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Leave Manager Tab ────────────────────────────────────────────────────────
 
 function LeaveManagerTab() {
@@ -523,51 +637,15 @@ function LeaveManagerTab() {
 
       {/* Leave Queue status panel */}
       {queueStatus && (queueStatus.pending > 0 || queueStatus.processing > 0 || queueStatus.failed > 0) && (
-        <Card className="border-orange-500/30 bg-orange-950/20">
-          <CardContent className="p-3">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="flex items-center gap-2 text-xs font-mono text-orange-300">
-                <Clock className="w-3.5 h-3.5" />
-                <span>طابور المغادرة</span>
-                {queueStatus.processing > 0 && (
-                  <span className="flex items-center gap-1 text-yellow-400">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    يعالج {queueStatus.processing}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-3 text-xs font-mono">
-                {queueStatus.pending > 0 && <span className="text-orange-400">⏳ {queueStatus.pending} معلق</span>}
-                {queueStatus.failed > 0 && <span className="text-red-400">❌ {queueStatus.failed} فشل</span>}
-                <button
-                  onClick={() => refetchQueue()}
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                  title="تحديث"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-            {queueStatus.items.slice(0, 5).map((item) => (
-              <div key={item.id} className="text-xs font-mono text-muted-foreground py-0.5 flex items-center gap-2">
-                {item.status === "processing" ? (
-                  <Loader2 className="w-3 h-3 animate-spin text-yellow-400 flex-shrink-0" />
-                ) : item.status === "failed" ? (
-                  <XCircle className="w-3 h-3 text-red-400 flex-shrink-0" />
-                ) : (
-                  <Clock className="w-3 h-3 text-orange-400/60 flex-shrink-0" />
-                )}
-                <span className="truncate">{item.title ?? item.id}</span>
-                {item.errorMessage && <span className="text-red-400/70 truncate">— {item.errorMessage}</span>}
-              </div>
-            ))}
-            {queueStatus.items.length > 5 && (
-              <div className="text-xs font-mono text-muted-foreground mt-1">
-                … و {queueStatus.items.length - 5} آخرين
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <LeaveQueuePanel
+          queueStatus={queueStatus}
+          selectedPhone={selectedPhone}
+          onRefetch={refetchQueue}
+          onCleared={() => {
+            refetchQueue();
+            qc.invalidateQueries({ queryKey: ["/api/accounts"] });
+          }}
+        />
       )}
 
       {/* Info banner for channels_limit */}

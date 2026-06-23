@@ -287,6 +287,15 @@ async function tick(): Promise<void> {
     }
 
     if (!link) {
+      // Before declaring "queue empty", check if there are ANY pending links at all.
+      // If pending links exist but none match this account's specialty filter,
+      // this is a specialty mismatch — not an empty queue. Stay silent and retry.
+      const anyPending = await targetLinksCol.countDocuments({ status: "pending" });
+      if (anyPending > 0) {
+        // Links exist but none suit this account's specialty — try again later.
+        scheduleNext(5 * 60_000);
+        return;
+      }
       const hasJoined = await targetLinksCol.countDocuments({ status: "joined" });
       if (hasJoined > 0) {
         eventBus.publish({

@@ -668,66 +668,60 @@ async function runBatchClassification(): Promise<void> {
   const { logger } = await import("../lib/logger.js");
 
   type SourceType = "joined" | "invite" | "left_group" | "skipped_link" | "synced_dialog";
-  const urlMap = new Map<string, { title: string; url: string; source: SourceType; id: any }>();
+  const urlMap = new Map<string, { title: string | null; url: string; source: SourceType; id: any }>();
 
   // ── Source 1: JOINED collection ──────────────────────────────────────────────
+  // NOTE: We no longer require groupTitle to be non-empty — items with no title
+  // can still be classified by URL slug, so they should be included.
   const joinedCol = await collections.joined();
   const joinedLinks = await joinedCol.find({
-    groupTitle: { $exists: true, $nin: [null, ""] },
     $or: [{ specialty: { $exists: false } }, { specialty: null }],
   } as any).toArray();
   for (const l of joinedLinks) {
-    urlMap.set(l.url, { title: (l as any).groupTitle, url: l.url, source: "joined", id: l._id });
+    if (!l.url) continue;
+    urlMap.set(l.url, { title: (l as any).groupTitle ?? null, url: l.url, source: "joined", id: l._id });
   }
 
   // ── Source 2: invite_requests collection ─────────────────────────────────────
   const inviteCol = await collections.inviteRequests();
   const inviteLinks = await inviteCol.find({
-    groupTitle: { $exists: true, $nin: [null, ""] },
     $or: [{ specialty: { $exists: false } }, { specialty: null }],
   } as any).toArray();
   for (const l of inviteLinks) {
-    if (!urlMap.has(l.url)) {
-      urlMap.set(l.url, { title: (l as any).groupTitle, url: l.url, source: "invite", id: l._id });
-    }
+    if (!l.url || urlMap.has(l.url)) continue;
+    urlMap.set(l.url, { title: (l as any).groupTitle ?? null, url: l.url, source: "invite", id: l._id });
   }
 
   // ── Source 3: left_groups ─────────────────────────────────────────────────────
   const leftCol = await collections.leftGroups();
   const leftRecords = await (leftCol as any).find({
-    title: { $exists: true, $nin: [null, ""] },
     $or: [{ specialty: { $exists: false } }, { specialty: null }],
   }).toArray();
   for (const l of leftRecords) {
-    if (l.url && !urlMap.has(l.url)) {
-      urlMap.set(l.url, { title: l.title, url: l.url, source: "left_group", id: l._id });
-    }
+    if (!l.url || urlMap.has(l.url)) continue;
+    urlMap.set(l.url, { title: l.title ?? null, url: l.url, source: "left_group", id: l._id });
   }
 
-  // ── Source 4: TARGET_LINKS skipped with groupTitle ────────────────────────────
+  // ── Source 4: TARGET_LINKS skipped ───────────────────────────────────────────
   const targetLinksCol = await collections.targetLinks();
   const skippedRecords = await targetLinksCol.find({
     status: "skipped",
-    groupTitle: { $exists: true, $nin: [null, ""] },
     $or: [{ specialty: { $exists: false } }, { specialty: null }],
   } as any).toArray();
   for (const s of skippedRecords) {
-    if (!urlMap.has(s.url)) {
-      urlMap.set(s.url, { title: (s as any).groupTitle, url: s.url, source: "skipped_link", id: s._id });
-    }
+    if (!s.url || urlMap.has(s.url)) continue;
+    urlMap.set(s.url, { title: (s as any).groupTitle ?? null, url: s.url, source: "skipped_link", id: s._id });
   }
 
   // ── Source 5: synced_dialogs (account dialogs synced from all accounts) ───────
   const syncedCol = await collections.syncedDialogs();
   const syncedDialogs = await (syncedCol as any).find({
-    title: { $exists: true, $nin: [null, ""] },
     url: { $exists: true, $nin: [null, ""] },
     $or: [{ specialty: { $exists: false } }, { specialty: null }],
   }).toArray();
   for (const d of syncedDialogs) {
-    if (d.url && !urlMap.has(d.url)) {
-      urlMap.set(d.url, { title: d.title, url: d.url, source: "synced_dialog", id: d._id });
-    }
+    if (!d.url || urlMap.has(d.url)) continue;
+    urlMap.set(d.url, { title: d.title ?? null, url: d.url, source: "synced_dialog", id: d._id });
   }
 
   const deduped = Array.from(urlMap.values());
