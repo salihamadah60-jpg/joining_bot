@@ -156,6 +156,10 @@ router.post("/links/bulk", async (req, res): Promise<void> => {
   }
 
   const source = body?.source ?? null;
+  // force=true: bypass the "already joined" check — allow re-adding URLs that
+  // were previously joined by other accounts, so they can be joined again.
+  const force: boolean = body?.force === true;
+
   const col = await collections.targetLinks();
   const joinedCol = await collections.joined();
 
@@ -178,14 +182,33 @@ router.post("/links/bulk", async (req, res): Promise<void> => {
       }
     }
 
-    const joinedDoc = await joinedCol.findOne({ url });
-    if (joinedDoc) {
-      alreadyJoined++;
-      alreadyJoinedUrls.push({ url, accountPhone: joinedDoc.accountPhone });
-      continue;
+    if (!force) {
+      const joinedDoc = await joinedCol.findOne({ url });
+      if (joinedDoc) {
+        alreadyJoined++;
+        alreadyJoinedUrls.push({ url, accountPhone: joinedDoc.accountPhone });
+        continue;
+      }
     }
 
     try {
+      // When force=true and a non-pending record already exists, reset it to pending
+      // instead of failing with a duplicate-key error.
+      if (force) {
+        const existing = await col.findOne({ url });
+        if (existing) {
+          if (existing.status !== "pending") {
+            await col.updateOne(
+              { _id: existing._id },
+              { $set: { status: "pending", failReason: null, processedAt: null, retryCount: 0, retryAfter: null, usedByAccountPhone: null } }
+            );
+            added++;
+          } else {
+            duplicates++;
+          }
+          continue;
+        }
+      }
       await col.insertOne({
         _id: new ObjectId(),
         url,
@@ -761,18 +784,35 @@ async function runBatchClassification(): Promise<void> {
       timestamp: new Date().toISOString(),
     });
 
+    let aiClassified = 0;
+    let aiFailed = 0;
     for (let batch = 0; batch < needsAI.length; batch += AI_BATCH) {
-      if (batch > 0) await new Promise<void>((r) => setTimeout(r, 4_000));
+      if (batch > 0) await new Promise<void>((r) => setTimeout(r, 5_000));
       const batchIndices = needsAI.slice(batch, batch + AI_BATCH);
       const batchItems = batchIndices.map(i => items[i]!);
       try {
         const aiResults = await classifySpecialtyBatch(batchItems);
         for (let j = 0; j < batchIndices.length; j++) {
-          if (aiResults[j] !== null) results[batchIndices[j]!] = aiResults[j]!;
+          if (aiResults[j] !== null) {
+            results[batchIndices[j]!] = aiResults[j]!;
+            aiClassified++;
+          }
         }
-      } catch {
-        // AI failed for this batch — skip, keyword results stand
+      } catch (err: any) {
+        aiFailed += batchIndices.length;
+        const errMsg = String(err?.message ?? err).substring(0, 80);
+        logger.warn({ batch, errMsg }, "AI classify batch failed — continuing with keyword results");
       }
+
+      // Emit progress after every AI batch so the UI stays updated
+      const batchsDone = Math.min(batch + AI_BATCH, needsAI.length);
+      eventBus.publish({
+        type: "classify_progress",
+        message: `🤖 ذكاء اصطناعي: ${batchsDone.toLocaleString()}/${needsAI.length.toLocaleString()} فُحص — مصنَّف حتى الآن: ${(keywordCount + aiClassified).toLocaleString()}${aiFailed > 0 ? ` (${aiFailed} تعذّر)` : ""}`,
+        total,
+        classified: keywordCount + aiClassified,
+        timestamp: new Date().toISOString(),
+      });
     }
   }
 

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -369,6 +369,38 @@ function LeaveManagerTab() {
   const selectedAccount = accounts.find((a: any) => a.phone === selectedPhone);
   const isChannelsLimit = selectedAccount?.status === "channels_limit";
 
+  // Hard-reset selection whenever the user switches to a different account
+  // (guards against stale React state showing old selections under new dialogs)
+  useEffect(() => {
+    setSelected(new Set());
+    setLeaveResults(null);
+    setFilterMode("all");
+    setSortBy("classification");
+    setSearchQ("");
+  }, [selectedPhone]);
+
+  const resetChannelsLimitMutation = useMutation({
+    mutationFn: async () => {
+      // Pass the current synced channels count so the DB value is accurate
+      const channelsCount = dialogs.length || undefined;
+      const r = await fetch(`/api/accounts/${selectedPhone}/reset-channels-limit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelsCount }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "✅ تمت إعادة الضبط",
+        description: `تم تغيير حالة الحساب إلى active — سيُستأنف الانضمام عند التشغيل`,
+      });
+      qc.invalidateQueries({ queryKey: ["/api/accounts"] });
+    },
+    onError: (e: any) => toast({ title: "خطأ", description: e.message, variant: "destructive" }),
+  });
+
   return (
     <div className="space-y-4">
       {/* Account selector + actions */}
@@ -426,10 +458,27 @@ function LeaveManagerTab() {
             )}
 
             {isChannelsLimit && (
-              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-orange-500/40 bg-orange-950/20 text-orange-400 text-xs font-mono">
-                <Zap className="w-3 h-3" />
-                الحساب ممتلئ — حدِّد المجموعات يدوياً ثم اضغط مغادرة
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-orange-500/40 bg-orange-950/20 text-orange-400 text-xs font-mono">
+                  <Zap className="w-3 h-3" />
+                  الحساب ممتلئ ({dialogs.length > 0 ? `${dialogs.length} قناة مزامَنة` : "channels_limit"})
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => resetChannelsLimitMutation.mutate()}
+                  disabled={resetChannelsLimitMutation.isPending}
+                  className="font-mono text-xs gap-1.5 border-green-500/40 text-green-400 hover:bg-green-500/10 hover:text-green-300"
+                  title="يضبط الحالة يدوياً إلى active — استخدمه إذا كان العدد أقل من 500 فعلياً"
+                >
+                  {resetChannelsLimitMutation.isPending ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-3 h-3" />
+                  )}
+                  إعادة تفعيل
+                </Button>
+              </div>
             )}
           </>
         )}

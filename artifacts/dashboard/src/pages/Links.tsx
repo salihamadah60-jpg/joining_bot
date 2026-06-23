@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useListLinks, useBulkAddLinks, useDeleteLink } from "@workspace/api-client-react";
+import { useListLinks, useDeleteLink } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Link as LinkIcon, Plus, Trash2, Filter, RotateCcw, CheckCircle2, Search, X, Eraser } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Link as LinkIcon, Plus, Trash2, Filter, RotateCcw, CheckCircle2, Search, X, Eraser, Loader2, Zap } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -23,18 +25,52 @@ export default function Links() {
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [searchText, setSearchText] = useState("");
 
-  const { data: links } = useListLinks({
+  const { data: links, isLoading: linksLoading } = useListLinks({
     status: statusFilter !== "all" ? (statusFilter as any) : undefined,
   });
 
   const deleteLink = useDeleteLink();
-  const bulkAddLinks = useBulkAddLinks();
 
   const [isBulkOpen, setIsBulkOpen] = useState(false);
   const [bulkUrls, setBulkUrls] = useState("");
+  const [forceAdd, setForceAdd] = useState(false);
   const [joinedFeedback, setJoinedFeedback] = useState<AlreadyJoinedEntry[]>([]);
   const [isJoinedDialogOpen, setIsJoinedDialogOpen] = useState(false);
   const [isClearOpen, setIsClearOpen] = useState(false);
+
+  const bulkAddMutation = useMutation({
+    mutationFn: async ({ urls, force }: { urls: string; force: boolean }) => {
+      const res = await fetch("/api/links/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls: [urls], force }),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `HTTP ${res.status}`);
+      }
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/links"] });
+      setIsBulkOpen(false);
+      setBulkUrls("");
+      setForceAdd(false);
+      const extracted = data.extracted ?? data.total ?? 0;
+      const alreadyJoined = data.alreadyJoined ?? 0;
+      const alreadyJoinedUrls: AlreadyJoinedEntry[] = data.alreadyJoinedUrls ?? [];
+      let description = `${extracted} رابط استُخرج — ${data.added} جديد — ${data.duplicates ?? 0} مكرر`;
+      if (alreadyJoined > 0) description += ` — ${alreadyJoined} تم الانضمام سابقاً`;
+      toast({ title: "✅ تمت المعالجة", description });
+      if (alreadyJoinedUrls.length > 0) {
+        setJoinedFeedback(alreadyJoinedUrls);
+        setIsJoinedDialogOpen(true);
+      }
+    },
+    onError: (e: any) => {
+      toast({ title: "خطأ", description: e.message || "فشل إضافة الروابط", variant: "destructive" });
+    },
+  });
 
   const clearQueue = useMutation({
     mutationFn: async () => {
@@ -75,30 +111,7 @@ export default function Links() {
 
   const handleBulkAdd = () => {
     if (!bulkUrls.trim()) return;
-    bulkAddLinks.mutate(
-      { data: { urls: [bulkUrls] } },
-      {
-        onSuccess: (data) => {
-          queryClient.invalidateQueries({ queryKey: ["/api/links"] });
-          setIsBulkOpen(false);
-          setBulkUrls("");
-          const extracted = (data as any).extracted ?? data.total ?? 0;
-          const alreadyJoined = data.alreadyJoined ?? 0;
-          const alreadyJoinedUrls: AlreadyJoinedEntry[] =
-            (data.alreadyJoinedUrls as AlreadyJoinedEntry[] | undefined) ?? [];
-          let description = `${extracted} رابط استُخرج — ${data.added} جديد — ${data.duplicates ?? 0} مكرر`;
-          if (alreadyJoined > 0) description += ` — ${alreadyJoined} تم الانضمام سابقاً`;
-          toast({ title: "✅ تمت المعالجة", description });
-          if (alreadyJoinedUrls.length > 0) {
-            setJoinedFeedback(alreadyJoinedUrls);
-            setIsJoinedDialogOpen(true);
-          }
-        },
-        onError: () => {
-          toast({ title: "خطأ", description: "فشل إضافة الروابط", variant: "destructive" });
-        },
-      }
-    );
+    bulkAddMutation.mutate({ urls: bulkUrls, force: forceAdd });
   };
 
   const retryLink = useMutation({
@@ -208,21 +221,48 @@ export default function Links() {
             <DialogHeader>
               <DialogTitle className="font-mono">PASTE_TARGET_LINKS</DialogTitle>
             </DialogHeader>
-            <div className="py-4">
+            <div className="py-4 space-y-4">
               <Textarea
                 value={bulkUrls}
                 onChange={(e) => setBulkUrls(e.target.value)}
                 placeholder={"https://t.me/group1\nhttps://t.me/group2"}
                 className="bg-background border-input min-h-[200px] font-mono text-sm"
               />
+              {/* Force-add toggle */}
+              <div
+                className={`flex items-start gap-3 rounded-md border p-3 cursor-pointer transition-colors ${forceAdd ? "border-orange-500/50 bg-orange-950/20" : "border-card-border bg-muted/10 hover:border-orange-500/30"}`}
+                onClick={() => setForceAdd((v) => !v)}
+              >
+                <Checkbox
+                  id="force-add"
+                  checked={forceAdd}
+                  onCheckedChange={(v) => setForceAdd(!!v)}
+                  className="mt-0.5"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <div className="space-y-0.5">
+                  <Label htmlFor="force-add" className="font-mono text-sm flex items-center gap-1.5 cursor-pointer">
+                    <Zap className="w-3.5 h-3.5 text-orange-400" />
+                    إضافة إجبارية (Force Add)
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    يتجاوز قاعدة "تم الانضمام سابقاً" — يعيد الروابط المنضَم إليها إلى الطابور حتى لو سبق معالجتها. مفيد عند نقل الروابط بين الحسابات.
+                  </p>
+                </div>
+              </div>
             </div>
             <DialogFooter>
               <Button
                 onClick={handleBulkAdd}
-                disabled={!bulkUrls || bulkAddLinks.isPending}
-                className="font-mono w-full"
+                disabled={!bulkUrls || bulkAddMutation.isPending}
+                className={`font-mono w-full gap-2 ${forceAdd ? "bg-orange-600 hover:bg-orange-700" : ""}`}
               >
-                INJECT_TARGETS
+                {bulkAddMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : forceAdd ? (
+                  <Zap className="w-4 h-4" />
+                ) : null}
+                {forceAdd ? "FORCE_INJECT_TARGETS" : "INJECT_TARGETS"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -400,7 +440,16 @@ export default function Links() {
               {filteredLinks.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
-                    {hasActiveFilter ? "لا توجد روابط تطابق الفلتر المحدد" : "NO_LINKS_IN_QUEUE"}
+                    {linksLoading ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        جاري التحميل...
+                      </span>
+                    ) : hasActiveFilter ? (
+                      "لا توجد روابط تطابق الفلتر المحدد"
+                    ) : (
+                      "NO_LINKS_IN_QUEUE"
+                    )}
                   </TableCell>
                 </TableRow>
               )}

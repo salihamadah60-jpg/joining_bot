@@ -151,6 +151,33 @@ router.delete("/accounts/:id", async (req, res): Promise<void> => {
   res.sendStatus(204);
 });
 
+/**
+ * POST /accounts/:phone/reset-channels-limit
+ * Manually reset a channels_limit account back to active.
+ * Optionally update channelsCount to the provided value.
+ */
+router.post("/accounts/:phone/reset-channels-limit", async (req, res): Promise<void> => {
+  const phone = req.params["phone"];
+  if (!phone) { res.status(400).json({ error: "phone required" }); return; }
+  const body = req.body as { channelsCount?: number } | undefined;
+
+  const col = await collections.accounts();
+  const account = await col.findOne({ phone });
+  if (!account) { res.status(404).json({ error: "Account not found" }); return; }
+
+  const updates: Record<string, any> = {
+    status: "active",
+    updatedAt: new Date(),
+  };
+  if (typeof body?.channelsCount === "number") {
+    updates["channelsCount"] = body.channelsCount;
+  }
+
+  await col.updateOne({ phone }, { $set: updates });
+  const updated = await col.findOne({ phone });
+  res.json({ ok: true, account: serializeAccount(updated) });
+});
+
 /** Quick ping — checks if the Telegram session is actually connected */
 router.get("/accounts/:id/ping", async (req, res): Promise<void> => {
   const id = req.params["id"];
