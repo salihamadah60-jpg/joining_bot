@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Link as LinkIcon, Plus, Trash2, Filter, RotateCcw, CheckCircle2, Search, X } from "lucide-react";
+import { Link as LinkIcon, Plus, Trash2, Filter, RotateCcw, CheckCircle2, Search, X, Eraser } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -34,6 +34,24 @@ export default function Links() {
   const [bulkUrls, setBulkUrls] = useState("");
   const [joinedFeedback, setJoinedFeedback] = useState<AlreadyJoinedEntry[]>([]);
   const [isJoinedDialogOpen, setIsJoinedDialogOpen] = useState(false);
+  const [isClearOpen, setIsClearOpen] = useState(false);
+
+  const clearQueue = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/links/clear-queue", { method: "POST" });
+      if (!res.ok) throw new Error("فشل تصفير الطابور");
+      return res.json() as Promise<{ ok: boolean; cleared: number }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/links"] });
+      setIsClearOpen(false);
+      toast({
+        title: "🗑️ تم تصفير الطابور",
+        description: `حُذف ${data.cleared.toLocaleString()} رابط — وصُفِّرت عدادات الانضمام اليومية لجميع الحسابات`,
+      });
+    },
+    onError: () => toast({ title: "خطأ", description: "فشل تصفير الطابور", variant: "destructive" }),
+  });
 
   // Unique sources from data for the source filter dropdown
   const uniqueSources = useMemo(() => {
@@ -146,12 +164,46 @@ export default function Links() {
           )}
         </h1>
 
-        <Dialog open={isBulkOpen} onOpenChange={setIsBulkOpen}>
-          <DialogTrigger asChild>
-            <Button className="font-mono">
-              <Plus className="w-4 h-4 mr-2" /> BULK_ADD_LINKS
-            </Button>
-          </DialogTrigger>
+        <div className="flex items-center gap-2">
+          {/* Clear queue button */}
+          <Dialog open={isClearOpen} onOpenChange={setIsClearOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="font-mono border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive">
+                <Eraser className="w-4 h-4 mr-2" /> CLEAR_QUEUE
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="border-card-border bg-card max-w-md">
+              <DialogHeader>
+                <DialogTitle className="font-mono text-destructive flex items-center gap-2">
+                  <Eraser className="w-5 h-5" /> تصفير الطابور
+                </DialogTitle>
+              </DialogHeader>
+              <div className="py-3 space-y-3 text-sm text-muted-foreground">
+                <p>سيتم حذف جميع الروابط بحالة <span className="text-yellow-400 font-mono">pending</span> و<span className="text-red-400 font-mono">failed</span> و<span className="text-muted-foreground font-mono">skipped</span> من الطابور.</p>
+                <p>سيتم أيضاً تصفير عدادات الانضمام اليومية لجميع الحسابات.</p>
+                <p className="text-orange-400 font-medium">⚠️ هذه العملية لا يمكن التراجع عنها.</p>
+              </div>
+              <DialogFooter className="gap-2">
+                <Button variant="ghost" onClick={() => setIsClearOpen(false)} className="font-mono">إلغاء</Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => clearQueue.mutate()}
+                  disabled={clearQueue.isPending}
+                  className="font-mono"
+                >
+                  {clearQueue.isPending ? "جاري التصفير..." : "تأكيد التصفير"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Bulk add button */}
+          <Dialog open={isBulkOpen} onOpenChange={setIsBulkOpen}>
+            <DialogTrigger asChild>
+              <Button className="font-mono">
+                <Plus className="w-4 h-4 mr-2" /> BULK_ADD_LINKS
+              </Button>
+            </DialogTrigger>
           <DialogContent className="border-card-border bg-card max-w-2xl">
             <DialogHeader>
               <DialogTitle className="font-mono">PASTE_TARGET_LINKS</DialogTitle>
@@ -175,6 +227,7 @@ export default function Links() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Filters row */}

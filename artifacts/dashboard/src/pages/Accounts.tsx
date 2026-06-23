@@ -179,7 +179,7 @@ function SyncedDialogsPanel({ phone }: { phone: string }) {
       </div>
 
       {/* Dialog list */}
-      <div className="max-h-48 overflow-y-auto space-y-0.5 border border-border rounded-md p-1.5 bg-background">
+      <div className="max-h-80 overflow-y-auto space-y-0.5 border border-border rounded-md p-1.5 bg-background">
         {isLoading && (
           <p className="text-xs text-muted-foreground py-3 text-center">⏳ جاري التحميل...</p>
         )}

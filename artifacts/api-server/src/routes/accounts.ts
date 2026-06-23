@@ -218,72 +218,75 @@ router.post("/accounts/:id/sync-dialogs", async (req, res): Promise<void> => {
     const syncedAt = new Date();
     const allChats: any[] = [];
 
-    let offsetDate = 0;
-    let offsetId = 0;
-    let offsetPeer: any = { _: "inputPeerEmpty" };
-    let page = 0;
-    const MAX_PAGES = 20; // safety cap — 20×100 = 2000 chats max
+    // Helper: fetch all group/channel chats from a given Telegram folder via pagination
+    const fetchFolder = async (folderId: number) => {
+      let offsetDate = 0;
+      let offsetId = 0;
+      let offsetPeer: any = { _: "inputPeerEmpty" };
+      let page = 0;
+      const MAX_PAGES = 20; // 20×100 = 2000 dialogs per folder
 
-    while (page < MAX_PAGES) {
-      const result: any = await (client as any).call({
-        _: "messages.getDialogs",
-        excludePinned: false,
-        folderId: 0,
-        offsetDate,
-        offsetId,
-        offsetPeer,
-        limit: 100,
-        hash: BigInt(0),
-      });
+      while (page < MAX_PAGES) {
+        const result: any = await (client as any).call({
+          _: "messages.getDialogs",
+          excludePinned: false,
+          folderId,
+          offsetDate,
+          offsetId,
+          offsetPeer,
+          limit: 100,
+          hash: BigInt(0),
+        });
 
-      const chats: any[] = result?.chats ?? [];
-      const dialogs: any[] = result?.dialogs ?? [];
+        const chats: any[] = result?.chats ?? [];
+        const dialogs: any[] = result?.dialogs ?? [];
 
-      // Build a map of id → chat for quick lookup
-      const chatMap: Record<string, any> = {};
-      for (const c of chats) {
-        const id = String(c?.id ?? "");
-        if (id) chatMap[id] = c;
-      }
+        const chatMap: Record<string, any> = {};
+        for (const c of chats) {
+          const id = String(c?.id ?? "");
+          if (id) chatMap[id] = c;
+        }
 
-      // Filter only groups and channels from the chats array
-      const groupChats = chats.filter((c: any) => {
-        const t: string = c?._ ?? "";
-        return t === "chat" || t === "channel";
-      });
+        const groupChats = chats.filter((c: any) => {
+          const t: string = c?._ ?? "";
+          return t === "chat" || t === "channel";
+        });
 
-      allChats.push(...groupChats);
+        allChats.push(...groupChats);
 
-      // Stop if Telegram returned fewer dialogs than we asked for (end of list)
-      if (dialogs.length < 100) break;
+        if (dialogs.length < 100) break;
 
-      // Prepare pagination offset from the last dialog
-      const lastDialog = dialogs[dialogs.length - 1];
-      const lastMsg = (result?.messages ?? []).find(
-        (m: any) => m?.id === lastDialog?.topMessage
-      );
-      offsetDate = lastMsg?.date ?? offsetDate;
-      offsetId = lastDialog?.topMessage ?? 0;
+        const lastDialog = dialogs[dialogs.length - 1];
+        const lastMsg = (result?.messages ?? []).find(
+          (m: any) => m?.id === lastDialog?.topMessage
+        );
+        offsetDate = lastMsg?.date ?? offsetDate;
+        offsetId = lastDialog?.topMessage ?? 0;
 
-      const lastPeer = lastDialog?.peer;
-      if (lastPeer?._ === "peerChannel" || lastPeer?._ === "peerChat") {
-        const chatId = lastPeer?.channelId ?? lastPeer?.chatId;
-        const chat = chatMap[String(chatId)];
-        if (chat) {
-          if (chat?._ === "channel") {
-            offsetPeer = {
-              _: "inputPeerChannel",
-              channelId: chatId,
-              accessHash: chat?.accessHash ?? BigInt(0),
-            };
-          } else {
-            offsetPeer = { _: "inputPeerChat", chatId };
+        const lastPeer = lastDialog?.peer;
+        if (lastPeer?._ === "peerChannel" || lastPeer?._ === "peerChat") {
+          const chatId = lastPeer?.channelId ?? lastPeer?.chatId;
+          const chat = chatMap[String(chatId)];
+          if (chat) {
+            if (chat?._ === "channel") {
+              offsetPeer = {
+                _: "inputPeerChannel",
+                channelId: chatId,
+                accessHash: chat?.accessHash ?? BigInt(0),
+              };
+            } else {
+              offsetPeer = { _: "inputPeerChat", chatId };
+            }
           }
         }
-      }
 
-      page++;
-    }
+        page++;
+      }
+    };
+
+    // Fetch from folder 0 (main inbox) AND folder 1 (archived)
+    await fetchFolder(0);
+    await fetchFolder(1).catch(() => {}); // archived folder may not exist — ignore errors
 
     // Replace all synced data for this account
     await syncedCol.deleteMany({ accountPhone: account.phone });

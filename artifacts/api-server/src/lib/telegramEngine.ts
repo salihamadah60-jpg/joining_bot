@@ -448,6 +448,18 @@ async function attemptJoin(account: AccountDoc, link: TargetLinkDoc): Promise<bo
     const joinTarget = parseJoinTarget(link.url);
     const isPrivateInvite = joinTarget.startsWith("https://");
 
+    // ── 2b. Symbol-only username guard ──────────────────────────────────────
+    // If the public username has zero letters (only dots/underscores/digits/dashes),
+    // it is not a real Telegram group — skip silently without any confirmation.
+    if (!isPrivateInvite && !/[a-zA-Z\u0600-\u06FF]/.test(joinTarget)) {
+      logger.info({ url: link.url, joinTarget }, "PRE-JOIN: symbol-only username — silently skipping");
+      await targetLinksCol.updateOne(
+        { _id: link._id },
+        { $set: { status: "failed", failReason: "SYMBOL_ONLY_USERNAME", processedAt: new Date() } }
+      );
+      return false;
+    }
+
     // ── 3. PRE-JOIN keyword check (URL/username-based for public links) ────────
     // For public groups the username is part of the URL — check it before joining.
     if (!isPrivateInvite) {

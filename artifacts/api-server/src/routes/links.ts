@@ -118,6 +118,28 @@ router.post("/links", async (req, res): Promise<void> => {
   }
 });
 
+// ─── Clear queue — delete all pending/failed/skipped + reset daily counters ──
+router.post("/links/clear-queue", async (req, res): Promise<void> => {
+  try {
+    const col = await collections.targetLinks();
+    const accountsCol = await collections.accounts();
+
+    const result = await col.deleteMany({
+      status: { $in: ["pending", "failed", "skipped"] },
+    });
+
+    // Reset daily join counter on every account so they can start fresh
+    await accountsCol.updateMany({}, { $set: { joinedToday: 0, updatedAt: new Date() } });
+
+    const { logger } = await import("../lib/logger.js");
+    logger.info({ deleted: result.deletedCount }, "Queue cleared by user");
+
+    res.json({ ok: true, cleared: result.deletedCount });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.post("/links/bulk", async (req, res): Promise<void> => {
   let rawUrls: string[] = [];
   const body = req.body as any;
@@ -144,7 +166,18 @@ router.post("/links/bulk", async (req, res): Promise<void> => {
 
   const alreadyJoinedUrls: { url: string; accountPhone: string }[] = [];
 
+  let symbolOnly = 0;
   for (const url of rawUrls) {
+    // ── Skip symbol-only usernames (no letters at all) ──────────────────────
+    const isPrivateLink = url.includes("/+") || /\/joinchat\//i.test(url);
+    if (!isPrivateLink) {
+      const slug = url.replace(/^https?:\/\/t\.me\//i, "").split("/")[0] ?? "";
+      if (slug && !/[a-zA-Z\u0600-\u06FF]/.test(slug)) {
+        symbolOnly++;
+        continue;
+      }
+    }
+
     const joinedDoc = await joinedCol.findOne({ url });
     if (joinedDoc) {
       alreadyJoined++;
@@ -178,6 +211,7 @@ router.post("/links/bulk", async (req, res): Promise<void> => {
     duplicates,
     alreadyJoined,
     alreadyJoinedUrls,
+    symbolOnly,
     errors,
     total: rawUrls.length,
     extracted: rawUrls.length,
@@ -240,6 +274,60 @@ router.post("/links/:id/reject", async (req, res): Promise<void> => {
   }
 
   res.json({ ok: true, status: "skipped" });
+});
+
+// ── Bulk approve ─────────────────────────────────────────────────────────────
+router.post("/links/bulk-approve", async (req, res): Promise<void> => {
+  try {
+    const { ids } = req.body as { ids?: string[] };
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: "ids array required" });
+      return;
+    }
+    const col = await collections.targetLinks();
+    let approved = 0;
+    for (const id of ids) {
+      if (!ObjectId.isValid(id)) continue;
+      const link = await col.findOne({ _id: new ObjectId(id) });
+      if (!link) continue;
+      await col.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: "joined", failReason: null, processedAt: new Date() } }
+      );
+      if (link.groupTitle) await saveLearnedPattern(link.groupTitle, "relevant");
+      approved++;
+    }
+    res.json({ ok: true, approved });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Bulk reject ──────────────────────────────────────────────────────────────
+router.post("/links/bulk-reject", async (req, res): Promise<void> => {
+  try {
+    const { ids } = req.body as { ids?: string[] };
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: "ids array required" });
+      return;
+    }
+    const col = await collections.targetLinks();
+    let rejected = 0;
+    for (const id of ids) {
+      if (!ObjectId.isValid(id)) continue;
+      const link = await col.findOne({ _id: new ObjectId(id) });
+      if (!link) continue;
+      await col.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: "skipped", failReason: "user_rejected", processedAt: new Date() } }
+      );
+      if (link.groupTitle) await saveLearnedPattern(link.groupTitle, "not_relevant");
+      rejected++;
+    }
+    res.json({ ok: true, rejected });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 /** Save a learned pattern for future auto-classification */
