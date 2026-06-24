@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { collections, getBotState, setBotState } from "@workspace/db";
-import { engineStart, engineStop } from "../lib/telegramEngine.js";
+import { engineStart, engineStop, engineIsRunning, forceTickNow } from "../lib/telegramEngine.js";
 import { SAFE_INTERVAL_PER_ACCOUNT_SECS, DAILY_LIMIT } from "../lib/timing.js";
 
 const router: IRouter = Router();
@@ -156,6 +156,22 @@ router.get("/bot/activity", async (req, res): Promise<void> => {
     waitSeconds: l.waitSeconds ?? null,
     createdAt: l.createdAt ? new Date(l.createdAt).toISOString() : new Date().toISOString(),
   })));
+});
+
+// POST /api/bot/trigger-now — fire the next engine tick immediately (≤500ms)
+// If the engine is stopped, starts it first. Used from Settings "ابدأ الآن" button.
+router.post("/bot/trigger-now", async (req, res): Promise<void> => {
+  try {
+    if (!engineIsRunning()) {
+      await engineStart();
+      res.json({ ok: true, action: "started" });
+    } else {
+      forceTickNow();
+      res.json({ ok: true, action: "triggered" });
+    }
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;

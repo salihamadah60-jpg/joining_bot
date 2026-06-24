@@ -372,6 +372,14 @@ export async function startLeaveQueueProcessor(): Promise<void> {
   logger.info({ accounts: phones.length }, "Leave queue processor started");
 }
 
+/**
+ * Trigger the leave queue for a specific account to process immediately.
+ * Used when the user clicks "بدء المغادرة فوراً".
+ */
+export function triggerLeaveNow(phone: string): void {
+  scheduleQueueTick(phone, 500);
+}
+
 // ─── Internal queue scheduler ─────────────────────────────────────────────────
 
 function scheduleQueueTick(phone: string, delayMs?: number): void {

@@ -8,6 +8,7 @@ import { startAutoSync } from "./lib/mongoSync";
 import { startInviteRequestChecker } from "./lib/inviteRequestChecker";
 import { startLeaveEngine, startLeaveQueueProcessor } from "./lib/leaveEngine";
 import { startCustomKeywordRefresh } from "./lib/medicalKeywords";
+import { ensureCanonicalCollections } from "./lib/specialtyCollections";
 import { initMongo } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
@@ -141,6 +142,10 @@ async function initMongoWithRetry(attempt = 1): Promise<void> {
     startLeaveEngine();
     await startLeaveQueueProcessor();
     startCustomKeywordRefresh();
+    // Bootstrap the 10 canonical internal collections (idempotent)
+    ensureCanonicalCollections().catch((e) =>
+      logger.warn({ err: e }, "ensureCanonicalCollections failed — non-critical")
+    );
 
     setInterval(() => {
       cleanupIdleClients().catch((e) =>

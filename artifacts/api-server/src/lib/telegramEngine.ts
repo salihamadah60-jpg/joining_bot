@@ -127,6 +127,17 @@ export function engineIsRunning(): boolean {
   return engineRunning;
 }
 
+/**
+ * Force the engine to fire its next tick within 500 ms.
+ * Called when the user saves new timing settings and clicks "ابدأ الآن".
+ * No-op if the engine is not running (caller should start it first).
+ */
+export function forceTickNow(): void {
+  if (!engineRunning) return;
+  scheduleNext(500);
+  logger.info("Engine tick forced immediately by user request");
+}
+
 // ─── Scheduler ───────────────────────────────────────────────────────────────
 
 function scheduleNext(delayMs: number): void {

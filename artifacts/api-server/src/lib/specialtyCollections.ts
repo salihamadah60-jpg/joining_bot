@@ -8,6 +8,10 @@
  * but have no external MongoDB source — they are specialty-based containers
  * that exist purely to track which links belong to which specialty, and to
  * allow accounts to be assigned to them.
+ *
+ * Canonical 10 collections (ensureCanonicalCollections bootstraps them):
+ *   all, general, dentistry, pharmacy, nursing, laboratory,
+ *   anesthesia, exams, channels_only, invite_links
  */
 
 import { ObjectId } from "mongodb";
@@ -17,6 +21,19 @@ import { logger } from "./logger.js";
 
 // In-memory cache to avoid repeated DB lookups in the same server session
 const ensuredSpecialties = new Set<string>();
+
+const CANONICAL_SPECIALTIES = [
+  "all",
+  "general",
+  "dentistry",
+  "pharmacy",
+  "nursing",
+  "laboratory",
+  "anesthesia",
+  "exams",
+  "channels_only",
+  "invite_links",
+] as const;
 
 /**
  * Ensure an internal collection entry exists for the given specialty.
@@ -40,7 +57,7 @@ function extractLocalDbName(url: string): string {
 }
 
 export async function ensureSpecialtyCollection(specialty: string): Promise<void> {
-  if (!specialty || specialty === "all") return;
+  if (!specialty) return;
   if (ensuredSpecialties.has(specialty)) return;
 
   try {
@@ -83,10 +100,21 @@ export async function ensureSpecialtyCollection(specialty: string): Promise<void
 }
 
 /**
+ * Bootstrap all 10 canonical internal collections on server startup.
+ * Safe to call multiple times — idempotent.
+ */
+export async function ensureCanonicalCollections(): Promise<void> {
+  for (const specialty of CANONICAL_SPECIALTIES) {
+    await ensureSpecialtyCollection(specialty);
+  }
+  logger.info({ count: CANONICAL_SPECIALTIES.length }, "Canonical collections bootstrapped");
+}
+
+/**
  * Update the synced count on an internal collection (called when new links get its specialty).
  */
 export async function incrementSpecialtyCollectionCount(specialty: string, delta = 1): Promise<void> {
-  if (!specialty || specialty === "all") return;
+  if (!specialty) return;
   try {
     const col = await collections.mongoCollections();
     await col.updateOne(

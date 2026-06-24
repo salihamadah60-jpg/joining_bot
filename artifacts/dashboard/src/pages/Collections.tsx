@@ -453,6 +453,50 @@ export default function Collections() {
         </div>
       </div>
 
+      {/* ─── الأقسام الأساسية العشرة (Canonical 10 Buckets) ─────────────── */}
+      {(() => {
+        const canonicalOrder = ["all", "general", "dentistry", "pharmacy", "nursing", "laboratory", "anesthesia", "exams", "channels_only", "invite_links"];
+        const canonicalMeta: Record<string, { emoji: string; label: string; color: string }> = {
+          all:           { emoji: "🗂️", label: "كل الأقسام",         color: "text-blue-400 bg-blue-500/10 border-blue-500/20" },
+          general:       { emoji: "🩺", label: "طب عام",              color: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20" },
+          dentistry:     { emoji: "🦷", label: "طب أسنان",            color: "text-sky-400 bg-sky-500/10 border-sky-500/20" },
+          pharmacy:      { emoji: "💊", label: "صيدلة",               color: "text-green-400 bg-green-500/10 border-green-500/20" },
+          nursing:       { emoji: "🏥", label: "تمريض",               color: "text-pink-400 bg-pink-500/10 border-pink-500/20" },
+          laboratory:    { emoji: "🔬", label: "مختبرات",             color: "text-purple-400 bg-purple-500/10 border-purple-500/20" },
+          anesthesia:    { emoji: "💉", label: "تخدير وإنعاش",        color: "text-teal-400 bg-teal-500/10 border-teal-500/20" },
+          exams:         { emoji: "📚", label: "ابتعاث واختبارات",    color: "text-orange-400 bg-orange-500/10 border-orange-500/20" },
+          channels_only: { emoji: "📡", label: "قنوات طبية",          color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/20" },
+          invite_links:  { emoji: "🔗", label: "روابط دعوات",         color: "text-indigo-400 bg-indigo-500/10 border-indigo-500/20" },
+        };
+
+        const bySpecialty = (cols ?? []).reduce<Record<string, number>>((acc, c) => {
+          const sp = (c as any).specialty as string | null;
+          if (sp) acc[sp] = (c as any).syncedCount ?? 0;
+          return acc;
+        }, {});
+
+        return (
+          <div className="space-y-2">
+            <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest px-1">
+              الأقسام الأساسية — 10 تصنيفات داخلية
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {canonicalOrder.map((sp) => {
+                const meta = canonicalMeta[sp]!;
+                const count = bySpecialty[sp] ?? 0;
+                return (
+                  <div key={sp} className={`rounded-xl border px-3 py-2.5 ${meta.color} flex flex-col gap-0.5 select-none`}>
+                    <span className="text-base leading-none">{meta.emoji}</span>
+                    <span className="text-xs font-bold mt-1 leading-tight">{meta.label}</span>
+                    <span className="text-[11px] font-mono opacity-70">{count.toLocaleString()} رابط</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* AI Classification progress */}
       {classifyState.status !== "idle" && (
         <div className={`rounded-lg border px-4 py-3 text-sm font-mono flex items-center gap-3 ${

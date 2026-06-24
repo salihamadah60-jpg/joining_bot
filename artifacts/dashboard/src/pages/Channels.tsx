@@ -262,6 +262,19 @@ function LeaveQueuePanel({
     onError: (e: any) => toast({ title: "خطأ", description: e.message, variant: "destructive" }),
   });
 
+  const triggerMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/leave/trigger/${encodeURIComponent(selectedPhone)}`, { method: "POST" });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    onSuccess: () => {
+      toast({ title: "⚡ بدأت المغادرة الفورية", description: "جاري معالجة الطابور الآن" });
+      setTimeout(onRefetch, 1500);
+    },
+    onError: (e: any) => toast({ title: "خطأ", description: e.message, variant: "destructive" }),
+  });
+
   const visibleItems = expanded ? queueStatus.items : queueStatus.items.slice(0, 5);
   const hiddenCount = queueStatus.items.length - 5;
 
@@ -286,7 +299,20 @@ function LeaveQueuePanel({
             <button onClick={onRefetch} className="text-muted-foreground hover:text-foreground transition-colors" title="تحديث">
               <RefreshCw className="w-3 h-3" />
             </button>
-            {/* Clear queue button */}
+            {/* Trigger + Clear queue buttons */}
+            {queueStatus.pending > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => triggerMutation.mutate()}
+                disabled={triggerMutation.isPending || queueStatus.processing > 0}
+                className="h-5 px-2 text-[10px] font-mono text-orange-400 hover:text-orange-300 hover:bg-orange-500/10 gap-1"
+                title="بدء معالجة الطابور فوراً"
+              >
+                {triggerMutation.isPending ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Zap className="w-2.5 h-2.5" />}
+                بدء الآن
+              </Button>
+            )}
             {queueStatus.pending > 0 && (
               <Button
                 variant="ghost"

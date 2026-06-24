@@ -301,4 +301,15 @@ router.delete("/leave/queue/item/:id", async (req, res): Promise<void> => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /api/leave/trigger/:phone — trigger leave queue processing immediately (≤500ms)
+// Used from the "بدء المغادرة فوراً" button in the dashboard.
+router.post("/leave/trigger/:phone", async (req, res): Promise<void> => {
+  try {
+    const phone = decodeURIComponent(req.params["phone"]!);
+    const { triggerLeaveNow } = await import("../lib/leaveEngine.js");
+    triggerLeaveNow(phone);
+    res.json({ ok: true, triggered: true, phone });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

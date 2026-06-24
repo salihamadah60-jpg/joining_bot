@@ -227,6 +227,26 @@ export default function Settings() {
   const [restoreLoading, setRestoreLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
 
+  // Trigger engine tick immediately (Start Now)
+  const triggerNow = useMutation({
+    mutationFn: async () => {
+      const r = await fetch("/api/bot/trigger-now", { method: "POST" });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bot/status"] });
+      refetchBot();
+      toast({
+        title: "⚡ تم التشغيل الفوري",
+        description: data.action === "started"
+          ? "تم تشغيل البوت وسيبدأ الانضمام خلال ثوانٍ"
+          : "البوت سيبدأ الدورة القادمة خلال ثوانٍ",
+      });
+    },
+    onError: (e: any) => toast({ title: "خطأ في التشغيل الفوري", description: e?.message, variant: "destructive" }),
+  });
+
   // Force resume
   const forceResume = useMutation({
     mutationFn: async (hours: number) => {
@@ -702,6 +722,16 @@ export default function Settings() {
               <Button onClick={handleSaveSchedule} disabled={updateSettings.isPending} className="gap-2 flex-1">
                 <Save className="w-3.5 h-3.5" />
                 حفظ الجدول
+              </Button>
+              <Button
+                onClick={() => triggerNow.mutate()}
+                disabled={triggerNow.isPending}
+                variant="outline"
+                className="gap-2 border-primary/40 text-primary hover:bg-primary/10"
+                title="حفظ والبدء فوراً — يُشغّل البوت خلال ثوانٍ بدون انتظار"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                ابدأ الآن
               </Button>
             </div>
           </div>

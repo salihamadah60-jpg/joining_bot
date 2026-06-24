@@ -51,17 +51,26 @@ router.get("/collections", async (req, res): Promise<void> => {
   const targetLinksCol = await collections.targetLinks();
 
   // Count actual links in queue per collection source/specialty
+  const inviteCol = await collections.inviteRequests();
   const withCounts = await Promise.all(
     docs.map(async (doc) => {
       let totalInQueue: number;
       if ((doc as any).type === "internal") {
-        // Internal collections represent TARGET_LINKS filtered by specialty — count by specialty
         const specialty = (doc as any).specialty as string | null;
-        totalInQueue = await targetLinksCol.countDocuments(
-          specialty
-            ? { specialty }
-            : { $or: [{ specialty: { $exists: false } }, { specialty: null }] }
-        );
+        if (specialty === "invite_links") {
+          // invite_links collection counts from invite_requests
+          totalInQueue = await inviteCol.countDocuments({});
+        } else if (specialty === "all") {
+          // "all" collection = total of all target links
+          totalInQueue = await targetLinksCol.countDocuments({});
+        } else {
+          // Normal internal collections: count target_links by specialty
+          totalInQueue = await targetLinksCol.countDocuments(
+            specialty
+              ? { specialty }
+              : { $or: [{ specialty: { $exists: false } }, { specialty: null }] }
+          );
+        }
       } else {
         totalInQueue = await targetLinksCol.countDocuments({ source: doc.name });
       }

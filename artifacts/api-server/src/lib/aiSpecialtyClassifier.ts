@@ -31,6 +31,8 @@ export const SPECIALTY_DISPLAY_NAMES: Record<string, string> = {
   pharmacy: "صيدلة",
   exams: "ابتعاث واختبارات",
   channels_only: "قنوات طبية فقط",
+  invite_links: "روابط الدعوات",
+  all: "كل الأقسام",
 };
 
 /**
